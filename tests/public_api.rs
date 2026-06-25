@@ -1,0 +1,36 @@
+//! Integration tests exercising the public API surface (no network).
+
+use radion_sdk::realtime::{Channel, ChannelFilters, Subscription};
+use radion_sdk::{Radion, RadionError};
+
+#[test]
+fn builder_requires_api_key() {
+    let err = Radion::builder().build().unwrap_err();
+    assert!(matches!(err, RadionError::Connection(_)));
+}
+
+#[test]
+fn builder_applies_overrides() {
+    let radion = Radion::builder()
+        .api_key("rk_test")
+        .ws_url("wss://example.test/ws")
+        .build()
+        .expect("builds");
+    assert_eq!(radion.config.ws_url, "wss://example.test/ws");
+    assert!(!radion.realtime.connected());
+}
+
+#[test]
+fn subscription_filter_validation_is_public() {
+    // Missing required filter is rejected before any I/O.
+    assert!(Subscription::new("w", Channel::Wallets).validate().is_err());
+    assert!(
+        Subscription::new("w", Channel::Wallets)
+            .with_filters(ChannelFilters {
+                wallets: Some(vec!["0x1".into()]),
+                ..Default::default()
+            })
+            .validate()
+            .is_ok()
+    );
+}
