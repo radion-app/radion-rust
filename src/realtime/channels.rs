@@ -12,60 +12,60 @@ use crate::error::RadionError;
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum Channel {
-    /// Firehose of every confirmed channel's payloads.
-    Global,
-    /// Confirmed fills and order matches.
-    Trades,
-    /// Redemptions, splits, merges, conversions.
-    Activity,
-    /// Market / condition lifecycle.
-    Lifecycle,
-    /// UMA oracle lifecycle.
+    /// Order flow on the exchange (fills and order matches).
+    Trading,
+    /// Exchange fees charged.
+    Fees,
+    /// UMA question mechanism.
     Oracle,
-    /// ERC-20 collateral movements.
-    Collateral,
-    /// Module / bridge / combinatorial / ERC-1155 events.
+    /// Settlement outcomes.
+    Resolution,
+    /// Market creation and prep.
+    Lifecycle,
+    /// Plain CTF base layer splits, merges, and redemptions.
+    Positions,
+    /// Module / redeemer / neg-risk / combinatorial system.
     Combos,
-    /// Last-traded price ticks.
-    Prices,
-    /// Trades filtered to specific wallets.
+    /// ERC-1155 outcome-token moves.
+    Transfers,
+    /// Proxy wallet creation.
+    Accounts,
+    /// Events filtered to specific wallets (cross-cutting).
     Wallets,
-    /// Events filtered to specific markets.
+    /// Events filtered to specific markets (cross-cutting).
     Markets,
-    /// Trades above a notional threshold.
-    LargeTrades,
 }
 
 /// Every confirmed channel, in declaration order.
 pub const CHANNELS: [Channel; 11] = [
-    Channel::Global,
-    Channel::Trades,
-    Channel::Activity,
-    Channel::Lifecycle,
+    Channel::Trading,
+    Channel::Fees,
     Channel::Oracle,
-    Channel::Collateral,
+    Channel::Resolution,
+    Channel::Lifecycle,
+    Channel::Positions,
     Channel::Combos,
-    Channel::Prices,
+    Channel::Transfers,
+    Channel::Accounts,
     Channel::Wallets,
     Channel::Markets,
-    Channel::LargeTrades,
 ];
 
 impl Channel {
-    /// The wire name of this channel (e.g. `"large_trades"`).
+    /// The wire name of this channel (e.g. `"trading"`).
     pub fn as_str(&self) -> &'static str {
         match self {
-            Self::Global => "global",
-            Self::Trades => "trades",
-            Self::Activity => "activity",
-            Self::Lifecycle => "lifecycle",
+            Self::Trading => "trading",
+            Self::Fees => "fees",
             Self::Oracle => "oracle",
-            Self::Collateral => "collateral",
+            Self::Resolution => "resolution",
+            Self::Lifecycle => "lifecycle",
+            Self::Positions => "positions",
             Self::Combos => "combos",
-            Self::Prices => "prices",
+            Self::Transfers => "transfers",
+            Self::Accounts => "accounts",
             Self::Wallets => "wallets",
             Self::Markets => "markets",
-            Self::LargeTrades => "large_trades",
         }
     }
 }
@@ -207,23 +207,20 @@ mod tests {
         for channel in CHANNELS {
             assert_eq!(channel.as_str().parse::<Channel>().unwrap(), channel);
         }
-        assert_eq!(
-            "large_trades".parse::<Channel>().unwrap(),
-            Channel::LargeTrades
-        );
+        assert_eq!("trading".parse::<Channel>().unwrap(), Channel::Trading);
         assert!("nope".parse::<Channel>().is_err());
     }
 
     #[test]
     fn subscribable_channel_handles_mempool_prefix() {
-        let confirmed: SubscribableChannel = Channel::Trades.into();
-        assert_eq!(confirmed.to_string(), "trades");
+        let confirmed: SubscribableChannel = Channel::Trading.into();
+        assert_eq!(confirmed.to_string(), "trading");
         assert!(!confirmed.is_mempool());
 
-        let mempool: SubscribableChannel = "mempool.trades".parse().unwrap();
-        assert_eq!(mempool, SubscribableChannel::Mempool(Channel::Trades));
-        assert_eq!(mempool.to_string(), "mempool.trades");
-        assert_eq!(mempool.confirmed(), Channel::Trades);
+        let mempool: SubscribableChannel = "mempool.trading".parse().unwrap();
+        assert_eq!(mempool, SubscribableChannel::Mempool(Channel::Trading));
+        assert_eq!(mempool.to_string(), "mempool.trading");
+        assert_eq!(mempool.confirmed(), Channel::Trading);
         assert!(mempool.is_mempool());
     }
 
@@ -231,6 +228,6 @@ mod tests {
     fn filter_requirements_match_docs() {
         assert!(filter_requirement(Channel::Markets).is_some());
         assert!(filter_requirement(Channel::Wallets).is_some());
-        assert!(filter_requirement(Channel::Trades).is_none());
+        assert!(filter_requirement(Channel::Trading).is_none());
     }
 }

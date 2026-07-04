@@ -17,12 +17,12 @@ async fn main() -> anyhow::Result<()> {
 
     let mut trades = radion
         .realtime
-        .subscribe(Subscription::new("trades", Channel::Trades))
+        .subscribe(Subscription::new("trading", Channel::Trading))
         .await?;
 
     while let Some(event) = trades.next().await {
         match event.data {
-            Payload::Trades(trade) => println!("{} {:?}", event.id, trade.kind),
+            Payload::Trading(trade) => println!("{} {:?}", event.id, trade.kind),
             other => println!("{} {other:?}", event.id),
         }
     }

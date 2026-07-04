@@ -19,11 +19,11 @@ async fn main() -> anyhow::Result<()> {
 
     let mut trades = radion
         .realtime
-        .subscribe(Subscription::new("trades", Channel::Trades))
+        .subscribe(Subscription::new("trading", Channel::Trading))
         .await?;
 
     while let Some(event) = trades.next().await {
-        if let Payload::Trades(trade) = event.data {
+        if let Payload::Trading(trade) = event.data {
             println!("{} {:?}", event.id, trade.kind);
         }
     }
@@ -102,7 +102,7 @@ Reached as `radion.realtime`, or constructed standalone with
 
 `Subscription::new(id, channel)` takes a client-defined id (echoed back on every
 event) and a channel. Use `mempool.`-prefixed channels for speculative pending
-transactions: `"mempool.trades".parse::<SubscribableChannel>()?`.
+transactions: `"mempool.trading".parse::<SubscribableChannel>()?`.
 
 Attach server-side filters with `.with_filters(...)`. Some channels require a
 filter — `wallets` needs `wallets`, `markets` needs `market_ids` or `token_ids`.
@@ -119,11 +119,17 @@ let sub = Subscription::new("whales", Channel::Wallets).with_filters(ChannelFilt
 
 ### Channels
 
-`Channel` enumerates every confirmed channel (`Trades`, `Activity`, `Lifecycle`,
-`Oracle`, `Collateral`, `Combos`, `Prices`, `Wallets`, `Markets`, `LargeTrades`,
-`Global`); `CHANNELS` is the full array. Each channel's event `data` is the typed
-`Payload` enum — `match` on it for compile-time exhaustiveness. Unknown channels
-or event types are preserved as `Payload::Other(serde_json::Value)`.
+`Channel` enumerates every channel. Nine topic channels each carry a typed
+payload — `Trading`, `Fees`, `Oracle`, `Resolution`, `Lifecycle`, `Positions`,
+`Combos`, `Transfers`, `Accounts` — plus two cross-cutting filter channels,
+`Wallets` and `Markets`, that re-emit the matching topic payload. `CHANNELS` is
+the full array. Each channel's event `data` is the typed `Payload` enum — `match`
+on it for compile-time exhaustiveness. Unknown channels or event types are
+preserved as `Payload::Other(serde_json::Value)`.
+
+Filter high-volume order flow by size with `min_usd` on `Trading` (there is no
+separate large-trades channel). Every channel also has a `mempool.`-prefixed
+companion for speculative pending transactions.
 
 ### Lifecycle events
 

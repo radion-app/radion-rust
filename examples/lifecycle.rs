@@ -32,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
     radion.realtime.connect().await?;
     let mut events = radion
         .realtime
-        .subscribe(Subscription::new("global", Channel::Global))
+        .subscribe(Subscription::new("trading", Channel::Trading))
         .await?;
     while let Some(event) = events.next().await {
         println!("{}: {:?}", event.channel, event.data);

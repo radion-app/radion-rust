@@ -14,16 +14,16 @@ use crate::error::{RadionError, Result};
 /// `markets` needs `market_ids` or `token_ids`); see the channel docs.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ChannelFilters {
-    /// Wallet addresses to match (required by `wallets`, optional on `trades`).
+    /// Wallet addresses to match (required by `wallets`, optional on `trading`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wallets: Option<Vec<String>>,
     /// Condition / market ids to match (required by `markets`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub market_ids: Option<Vec<String>>,
-    /// ERC-1155 token ids to match (required by `markets`, optional on `prices`).
+    /// ERC-1155 token ids to match (required by `markets`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token_ids: Option<Vec<String>>,
-    /// Minimum trade notional in USD (optional on `large_trades`).
+    /// Minimum trade notional in USD (optional on `trading`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub min_usd: Option<f64>,
 }
@@ -206,7 +206,7 @@ impl InboundFrame {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::realtime::payloads::{Payload, TradeEventType};
+    use crate::realtime::payloads::{Payload, TradingEventType};
 
     #[test]
     fn validates_required_filters() {
@@ -225,8 +225,8 @@ mod tests {
         });
         assert!(markets.validate().is_ok());
 
-        // `trades` requires nothing.
-        assert!(Subscription::new("t", Channel::Trades).validate().is_ok());
+        // `trading` requires nothing.
+        assert!(Subscription::new("t", Channel::Trading).validate().is_ok());
     }
 
     #[test]
@@ -237,28 +237,28 @@ mod tests {
         let unsub = serde_json::to_string(&OutboundFrame::Unsubscribe { id: "x".into() }).unwrap();
         assert_eq!(unsub, r#"{"action":"unsubscribe","id":"x"}"#);
 
-        let sub = OutboundFrame::subscribe(&Subscription::new("trades", Channel::Trades));
+        let sub = OutboundFrame::subscribe(&Subscription::new("trading", Channel::Trading));
         let json: serde_json::Value =
             serde_json::from_str(&serde_json::to_string(&sub).unwrap()).unwrap();
         assert_eq!(json["action"], "subscribe");
-        assert_eq!(json["channel"], "trades");
+        assert_eq!(json["channel"], "trading");
         // No filters key when none are set.
         assert!(json.get("filters").is_none());
     }
 
     #[test]
     fn parses_and_types_event_frames() {
-        let raw = r#"{"type":"event","id":"t","channel":"trades","data":{"type":"order_filled_v2","side":1,"tokenId":"0xabc"}}"#;
+        let raw = r#"{"type":"event","id":"t","channel":"trading","data":{"type":"order_filled_v2","side":1,"tokenId":"0xabc"}}"#;
         let frame = parse_inbound_frame(raw).expect("valid frame");
         let event = frame.into_channel_event().expect("event");
         assert_eq!(event.id, "t");
         match event.data {
-            Payload::Trades(trade) => {
-                assert_eq!(trade.kind, TradeEventType::OrderFilledV2);
+            Payload::Trading(trade) => {
+                assert_eq!(trade.kind, TradingEventType::OrderFilledV2);
                 assert_eq!(trade.side, Some(1));
                 assert_eq!(trade.token_id.as_deref(), Some("0xabc"));
             }
-            other => panic!("expected trades payload, got {other:?}"),
+            other => panic!("expected trading payload, got {other:?}"),
         }
     }
 

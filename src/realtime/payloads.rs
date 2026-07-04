@@ -1,8 +1,8 @@
 //! Typed event payloads for every Radion realtime channel.
 //!
 //! Each channel emits a `data` object discriminated by a snake_case `type`
-//! field (the `prices` channel is the exception — a flat tick with no `type`).
-//! The structs below type the fields documented for each channel's payload.
+//! field. The structs below type the fields documented for each channel's
+//! payload.
 //!
 //! Provenance mirrors the published channel docs (`/websockets/channels/*`).
 //! An event whose `type` this SDK version does not enumerate — or whose shape
@@ -36,23 +36,28 @@ macro_rules! event_type_enum {
 }
 
 event_type_enum!(
-    /// Discriminator for [`TradesPayload`].
-    TradeEventType {
+    /// Discriminator for [`TradingPayload`].
+    TradingEventType {
         OrderFilledV1,
         OrderFilledV2,
         OrdersMatchedV1,
         OrdersMatchedV2,
+        OrderCancelled,
+        OrderPreapproved,
+        OrderPreapprovalInvalidated,
+        TradingPaused,
+        TradingUnpaused,
     }
 );
 
-/// Confirmed fill / order-match payload from the exchange contracts.
+/// Order flow on the exchange (fills, matches, cancels, preapprovals, pauses).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
-pub struct TradesPayload {
+pub struct TradingPayload {
     /// Event discriminator.
     #[serde(rename = "type")]
-    pub kind: TradeEventType,
+    pub kind: TradingEventType,
     /// `0` = buy, `1` = sell. v2 fills and matches only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub side: Option<i64>,
@@ -86,6 +91,39 @@ pub struct TradesPayload {
 }
 
 event_type_enum!(
+    /// Discriminator for [`FeesPayload`].
+    FeesEventType {
+        FeeChargedV1,
+        FeeChargedV2,
+    }
+);
+
+/// Exchange fee charged.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct FeesPayload {
+    /// Event discriminator.
+    #[serde(rename = "type")]
+    pub kind: FeesEventType,
+    /// Fee amount charged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fee: Option<Hex>,
+    /// Address charged the fee.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payer: Option<Hex>,
+    /// Address receiving the fee.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub receiver: Option<Hex>,
+    /// Order hash the fee is attached to.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub order_hash: Option<Hex>,
+    /// ERC-1155 token id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token_id: Option<Hex>,
+}
+
+event_type_enum!(
     /// Discriminator for [`OraclePayload`].
     OracleEventType {
         UmaAdapterQuestionInitialized,
@@ -107,7 +145,7 @@ event_type_enum!(
     }
 );
 
-/// UMA oracle lifecycle payload.
+/// UMA question mechanism payload.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
@@ -127,20 +165,52 @@ pub struct OraclePayload {
 }
 
 event_type_enum!(
-    /// Discriminator for [`LifecyclePayload`].
-    LifecycleEventType {
-        MarketPrepared,
-        NegRiskQuestionPrepared,
-        OutcomeReported,
-        EventPrepared,
-        ConditionResolved,
-        ConditionPreparation,
+    /// Discriminator for [`ResolutionPayload`].
+    ResolutionEventType {
         ConditionResolution,
-        TokenRegistered,
+        ConditionResolved,
+        OutcomeReported,
+        ResultReported,
+        ResolutionPaused,
+        ResolutionUnpaused,
+        ResolverPaused,
+        ResolverUnpaused,
     }
 );
 
-/// Market / condition lifecycle payload.
+/// Settlement outcome payload.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct ResolutionPayload {
+    /// Event discriminator.
+    #[serde(rename = "type")]
+    pub kind: ResolutionEventType,
+    /// Condition id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub condition_id: Option<Hex>,
+    /// Question id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub question_id: Option<Hex>,
+    /// Resolution payouts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payouts: Option<Vec<Hex>>,
+}
+
+event_type_enum!(
+    /// Discriminator for [`LifecyclePayload`].
+    LifecycleEventType {
+        MarketPrepared,
+        EventPrepared,
+        ConditionPreparation,
+        TokenRegistered,
+        NegRiskQuestionPrepared,
+        CombinatorialConditionPrepared,
+        MigrationConditionRegistered,
+    }
+);
+
+/// Market creation and prep payload.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
@@ -163,30 +233,25 @@ pub struct LifecyclePayload {
 }
 
 event_type_enum!(
-    /// Discriminator for [`ActivityPayload`].
-    ActivityEventType {
-        Redemption,
-        BinaryRedemption,
-        NegRiskRedemption,
-        PositionsRedeemed,
-        CollateralPositionSplit,
-        CollateralPositionsMerged,
-        CollateralPositionsConverted,
-        NegRiskPositionsConverted,
+    /// Discriminator for [`PositionsPayload`].
+    PositionsEventType {
         CtfPositionSplit,
         CtfPositionsMerge,
         CtfPayoutRedemption,
+        CollateralPositionSplit,
+        CollateralPositionsMerged,
+        PositionsRedeemed,
     }
 );
 
-/// Redemption / split / merge / conversion payload.
+/// Plain CTF base-layer split / merge / redemption payload.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
-pub struct ActivityPayload {
+pub struct PositionsPayload {
     /// Event discriminator.
     #[serde(rename = "type")]
-    pub kind: ActivityEventType,
+    pub kind: PositionsEventType,
     /// Amounts involved.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub amounts: Option<Vec<Hex>>,
@@ -199,75 +264,43 @@ pub struct ActivityPayload {
     /// Payout amount.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub payout: Option<Hex>,
-}
-
-event_type_enum!(
-    /// Discriminator for [`CollateralPayload`].
-    CollateralEventType {
-        Transfer,
-        Approval,
-        Wrapped,
-        Unwrapped,
-    }
-);
-
-/// ERC-20 collateral payload.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[non_exhaustive]
-pub struct CollateralPayload {
-    /// Event discriminator.
-    #[serde(rename = "type")]
-    pub kind: CollateralEventType,
-    /// Amount transferred / approved.
+    /// ERC-1155 token id.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub amount: Option<Hex>,
-    /// Sender address.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub from: Option<Hex>,
-    /// Recipient address.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub to: Option<Hex>,
+    pub token_id: Option<Hex>,
 }
 
 event_type_enum!(
     /// Discriminator for [`CombosPayload`].
     CombosEventType {
-        EventPrepared,
-        ResultReported,
+        Redemption,
+        BinaryRedemption,
+        NegRiskRedemption,
+        CollateralPositionsConverted,
+        NegRiskPositionsConverted,
+        PositionConverted,
         PositionRedeemed,
         ModulePositionsMerged,
         ModulePositionsSplit,
         HorizontalMerge,
         HorizontalSplit,
-        PositionConverted,
-        ConditionResolved,
-        ResolutionPaused,
-        ResolutionUnpaused,
-        ResolverPaused,
-        ResolverUnpaused,
+        SplitOnCondition,
+        MergedOnCondition,
+        ConvertedToYesBasket,
+        MergedFromYesBasket,
+        Extracted,
+        Injected,
+        Compressed,
+        CombinatorialWrapped,
+        CombinatorialUnwrapped,
+        PositionMigrated,
+        MigrationResolved,
         BridgePositionMinted,
         BridgePositionsBurned,
         LegacyCollateralSettled,
-        MigrationConditionRegistered,
-        MigrationResolved,
-        PositionMigrated,
-        CombinatorialConditionPrepared,
-        Compressed,
-        ConvertedToYesBasket,
-        Extracted,
-        Injected,
-        MergedFromYesBasket,
-        MergedOnCondition,
-        SplitOnCondition,
-        CombinatorialWrapped,
-        CombinatorialUnwrapped,
-        TransferSingle,
-        TransferBatch,
     }
 );
 
-/// Module / bridge / combinatorial / ERC-1155 payload.
+/// Module / redeemer / neg-risk / combinatorial system payload.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
@@ -278,6 +311,9 @@ pub struct CombosPayload {
     /// Amount.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub amount: Option<Hex>,
+    /// Condition id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub condition_id: Option<Hex>,
     /// Sender address.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub from: Option<Hex>,
@@ -292,43 +328,101 @@ pub struct CombosPayload {
     pub to: Option<Hex>,
 }
 
-/// Last-traded price tick. Flat shape — no `type` discriminator.
+event_type_enum!(
+    /// Discriminator for [`TransfersPayload`].
+    TransfersEventType {
+        TransferSingle,
+        TransferBatch,
+    }
+);
+
+/// ERC-1155 outcome-token move payload.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 #[non_exhaustive]
-pub struct PricesPayload {
-    /// ERC-1155 token id.
-    pub token_id: Hex,
-    /// Last-traded price, USDC per share.
-    pub price: f64,
-    /// When the tick was produced (Unix ms).
-    pub timestamp_ms: i64,
+pub struct TransfersPayload {
+    /// Event discriminator.
+    #[serde(rename = "type")]
+    pub kind: TransfersEventType,
+    /// Operator address.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operator: Option<Hex>,
+    /// Sender address.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from: Option<Hex>,
+    /// Recipient address.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub to: Option<Hex>,
+    /// Token id (`TransferSingle`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<Hex>,
+    /// Amount moved (`TransferSingle`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<Hex>,
+    /// Token ids (`TransferBatch`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ids: Option<Vec<Hex>>,
+    /// Amounts moved (`TransferBatch`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub values: Option<Vec<Hex>>,
+}
+
+event_type_enum!(
+    /// Discriminator for [`AccountsPayload`].
+    AccountsEventType {
+        WalletDeployed,
+        ProxyCreation,
+    }
+);
+
+/// Proxy wallet creation payload.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct AccountsPayload {
+    /// Event discriminator.
+    #[serde(rename = "type")]
+    pub kind: AccountsEventType,
+    /// The deployed / created proxy wallet address.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wallet: Option<Hex>,
+    /// The owner controlling the proxy wallet.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner: Option<Hex>,
+    /// Proxy implementation address.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proxy: Option<Hex>,
 }
 
 /// The typed payload carried by a channel event.
 ///
 /// The active variant is determined by the event frame's `channel` field. The
-/// `global`, `wallets`, and `markets` channels re-emit confirmed payloads, so
-/// they deserialize to whichever confirmed variant matches its `type`. Unknown
+/// `wallets` and `markets` filter channels re-emit confirmed payloads, so they
+/// deserialize to whichever confirmed variant matches its `type`. Unknown
 /// channels, unknown `type` values, or data that does not match any typed
 /// payload fall back to [`Payload::Other`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 #[non_exhaustive]
 pub enum Payload {
-    /// `trades` / `large_trades` payload.
-    Trades(TradesPayload),
+    /// `trading` payload.
+    Trading(TradingPayload),
+    /// `fees` payload.
+    Fees(FeesPayload),
     /// `oracle` payload.
     Oracle(OraclePayload),
+    /// `resolution` payload.
+    Resolution(ResolutionPayload),
     /// `lifecycle` payload.
     Lifecycle(LifecyclePayload),
-    /// `activity` payload.
-    Activity(ActivityPayload),
-    /// `collateral` payload.
-    Collateral(CollateralPayload),
+    /// `positions` payload.
+    Positions(PositionsPayload),
     /// `combos` payload.
     Combos(CombosPayload),
-    /// `prices` tick.
-    Prices(PricesPayload),
+    /// `transfers` payload.
+    Transfers(TransfersPayload),
+    /// `accounts` payload.
+    Accounts(AccountsPayload),
     /// Any structurally valid payload the SDK does not type.
     Other(serde_json::Value),
 }
@@ -351,16 +445,18 @@ impl Payload {
         }
 
         match channel {
-            Channel::Trades | Channel::LargeTrades => typed(data, Payload::Trades),
+            Channel::Trading => typed(data, Payload::Trading),
+            Channel::Fees => typed(data, Payload::Fees),
             Channel::Oracle => typed(data, Payload::Oracle),
+            Channel::Resolution => typed(data, Payload::Resolution),
             Channel::Lifecycle => typed(data, Payload::Lifecycle),
-            Channel::Activity => typed(data, Payload::Activity),
-            Channel::Collateral => typed(data, Payload::Collateral),
+            Channel::Positions => typed(data, Payload::Positions),
             Channel::Combos => typed(data, Payload::Combos),
-            Channel::Prices => typed(data, Payload::Prices),
-            // Firehose / filtered views re-emit confirmed payloads; the untagged
-            // enum picks the variant whose `type` matches, preserving unknowns.
-            Channel::Global | Channel::Wallets | Channel::Markets => {
+            Channel::Transfers => typed(data, Payload::Transfers),
+            Channel::Accounts => typed(data, Payload::Accounts),
+            // Filtered views re-emit confirmed payloads; the untagged enum picks
+            // the variant whose `type` matches, preserving unknowns.
+            Channel::Wallets | Channel::Markets => {
                 serde_json::from_value(data.clone()).unwrap_or(Payload::Other(data))
             }
         }
@@ -386,23 +482,24 @@ mod tests {
     }
 
     #[test]
-    fn prices_is_a_flat_tick() {
-        let data = json!({"token_id":"0x1","price":0.42,"timestamp_ms":1700000000000i64});
-        match Payload::from_channel(Channel::Prices, data) {
-            Payload::Prices(p) => {
-                assert_eq!(p.token_id, "0x1");
-                assert!((p.price - 0.42).abs() < f64::EPSILON);
+    fn trading_types_a_fill() {
+        let data = json!({"type":"order_filled_v2","side":1,"tokenId":"0xabc"});
+        match Payload::from_channel(Channel::Trading, data) {
+            Payload::Trading(t) => {
+                assert_eq!(t.kind, TradingEventType::OrderFilledV2);
+                assert_eq!(t.side, Some(1));
+                assert_eq!(t.token_id.as_deref(), Some("0xabc"));
             }
-            other => panic!("expected prices, got {other:?}"),
+            other => panic!("expected trading, got {other:?}"),
         }
     }
 
     #[test]
-    fn global_firehose_discriminates_by_type() {
-        // A lifecycle event arriving on the `global` firehose types correctly.
+    fn wallets_view_discriminates_by_type() {
+        // A lifecycle event arriving on the `wallets` filter channel types correctly.
         let data = json!({"type":"market_prepared","conditionId":"0xc"});
         assert!(matches!(
-            Payload::from_channel(Channel::Global, data),
+            Payload::from_channel(Channel::Wallets, data),
             Payload::Lifecycle(_)
         ));
     }
@@ -411,7 +508,7 @@ mod tests {
     fn unknown_event_type_falls_back_to_other() {
         let data = json!({"type":"brand_new_event","foo":1});
         assert!(matches!(
-            Payload::from_channel(Channel::Trades, data),
+            Payload::from_channel(Channel::Trading, data),
             Payload::Other(_)
         ));
     }

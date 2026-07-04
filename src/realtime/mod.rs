@@ -18,9 +18,10 @@ pub use client::{
     RealtimeOptions,
 };
 pub use payloads::{
-    ActivityEventType, ActivityPayload, CollateralEventType, CollateralPayload, CombosEventType,
-    CombosPayload, Hex, LifecycleEventType, LifecyclePayload, OracleEventType, OraclePayload,
-    Payload, PricesPayload, TradeEventType, TradesPayload,
+    AccountsEventType, AccountsPayload, CombosEventType, CombosPayload, FeesEventType, FeesPayload,
+    Hex, LifecycleEventType, LifecyclePayload, OracleEventType, OraclePayload, Payload,
+    PositionsEventType, PositionsPayload, ResolutionEventType, ResolutionPayload, TradingEventType,
+    TradingPayload, TransfersEventType, TransfersPayload,
 };
 pub use protocol::{ChannelEvent, ChannelFilters, Subscription};
 pub use reconnect::ReconnectOptions;

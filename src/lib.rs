@@ -14,9 +14,9 @@
 //! let radion = Radion::builder().api_key("rk_...").build()?;
 //! radion.realtime.connect().await?;
 //!
-//! let mut trades = radion.realtime.subscribe(Subscription::new("trades", Channel::Trades)).await?;
+//! let mut trades = radion.realtime.subscribe(Subscription::new("trading", Channel::Trading)).await?;
 //! while let Some(event) = trades.next().await {
-//!     if let Payload::Trades(trade) = event.data {
+//!     if let Payload::Trading(trade) = event.data {
 //!         println!("{} {:?}", event.id, trade);
 //!     }
 //! }
