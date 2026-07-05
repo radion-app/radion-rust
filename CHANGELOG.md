@@ -4,6 +4,21 @@ All notable changes to `radion-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.2] - 2026-07-05
+
+### Fixed
+
+- **Realtime payload structs now decode every field each channel's events
+  carry.** Rust drops undeclared fields, so incomplete structs silently lost
+  data; the channel docs now enumerate all 77 confirmed events and each struct
+  is the union of its events' fields. Corrected wrong fields: `FeesPayload` now
+  has `receiver` / `token_id` / `amount` (dropped `fee` / `payer` / `order_hash`);
+  `TransfersPayload` uses `amount` / `amounts` (was `value` / `values`);
+  `ResolutionPayload` uses `payout_numerators` / `result` (dropped `payouts`);
+  dropped the stray `id` / `operator` from `CombosPayload` and `token_id` from
+  `PositionsPayload`. Added the many previously-missing fields. All fields are
+  `Option`, so this is non-breaking.
+
 ## [0.4.1] - 2026-07-05
 
 ### Added

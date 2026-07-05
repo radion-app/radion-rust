@@ -2,7 +2,10 @@
 //!
 //! Each channel emits a `data` object discriminated by a snake_case `type`
 //! field. The structs below type the fields documented for each channel's
-//! payload.
+//! payload. The channel docs now enumerate every event's full field set, and
+//! each struct is the **union** of the fields carried by all of its channel's
+//! events — Rust drops any field not declared on the struct, so each struct
+//! lists every field its events can carry.
 //!
 //! Provenance mirrors the published channel docs (`/websockets/channels/*`).
 //! An event whose `type` this SDK version does not enumerate — or whose shape
@@ -58,9 +61,6 @@ pub struct TradingPayload {
     /// Event discriminator.
     #[serde(rename = "type")]
     pub kind: TradingEventType,
-    /// `0` = buy, `1` = sell. v2 fills and matches only.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub side: Option<i64>,
     /// Builder address.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub builder: Option<Hex>,
@@ -73,18 +73,36 @@ pub struct TradingPayload {
     /// Maker amount filled.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub maker_amount_filled: Option<Hex>,
+    /// Maker asset id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maker_asset_id: Option<Hex>,
     /// Opaque order metadata.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Hex>,
     /// Order hash.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub order_hash: Option<Hex>,
+    /// Address pausing trading.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pauser: Option<Hex>,
+    /// `0` = buy, `1` = sell. v2 fills and matches only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub side: Option<i64>,
     /// Taker address.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub taker: Option<Hex>,
     /// Taker amount filled.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub taker_amount_filled: Option<Hex>,
+    /// Taker asset id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub taker_asset_id: Option<Hex>,
+    /// Hash of the taker order (matches).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub taker_order_hash: Option<Hex>,
+    /// Maker of the taker order (matches).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub taker_order_maker: Option<Hex>,
     /// ERC-1155 token id.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token_id: Option<Hex>,
@@ -108,16 +126,10 @@ pub struct FeesPayload {
     pub kind: FeesEventType,
     /// Fee amount charged.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub fee: Option<Hex>,
-    /// Address charged the fee.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub payer: Option<Hex>,
+    pub amount: Option<Hex>,
     /// Address receiving the fee.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub receiver: Option<Hex>,
-    /// Order hash the fee is attached to.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub order_hash: Option<Hex>,
     /// ERC-1155 token id.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token_id: Option<Hex>,
@@ -156,12 +168,54 @@ pub struct OraclePayload {
     /// UMA question id.
     #[serde(rename = "questionID", skip_serializing_if = "Option::is_none")]
     pub question_id: Option<Hex>,
+    /// Ancillary data for the question.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ancillary_data: Option<Hex>,
+    /// Question creator address.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub creator: Option<Hex>,
+    /// Whether early resolution occurred.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub early_resolution: Option<bool>,
+    /// Whether early resolution is enabled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub early_resolution_enabled: Option<bool>,
+    /// Whether the report was an emergency report.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub emergency_report: Option<bool>,
+    /// Price identifier.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identifier: Option<Hex>,
+    /// Question owner address.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner: Option<Hex>,
     /// Resolution payouts.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub payouts: Option<Vec<Hex>>,
+    /// Proposal bond amount.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proposal_bond: Option<Hex>,
+    /// Request timestamp.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_timestamp: Option<Hex>,
+    /// Requestor address.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requestor: Option<Hex>,
+    /// Resolution reward amount.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reward: Option<Hex>,
+    /// Reward token address.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reward_token: Option<Hex>,
+    /// Resolution time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolution_time: Option<Hex>,
     /// `int256` price as a signed decimal string (e.g. `"-1"`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub settled_price: Option<String>,
+    /// Ancillary data update payload.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub update: Option<Hex>,
 }
 
 event_type_enum!(
@@ -189,12 +243,36 @@ pub struct ResolutionPayload {
     /// Condition id.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub condition_id: Option<Hex>,
+    /// Event id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<Hex>,
+    /// Market id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub market_id: Option<Hex>,
+    /// Oracle address.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oracle: Option<Hex>,
+    /// Reported outcome.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<bool>,
+    /// Outcome slot count.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outcome_slot_count: Option<Hex>,
+    /// Resolution payout numerators.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payout_numerators: Option<Vec<Hex>>,
     /// Question id.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub question_id: Option<Hex>,
-    /// Resolution payouts.
+    /// Reported result.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub payouts: Option<Vec<Hex>>,
+    pub result: Option<Vec<Hex>>,
+    /// Resolver address.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolver: Option<Hex>,
+    /// Event timestamp.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<Hex>,
 }
 
 event_type_enum!(
@@ -218,9 +296,36 @@ pub struct LifecyclePayload {
     /// Event discriminator.
     #[serde(rename = "type")]
     pub kind: LifecycleEventType,
+    /// Number of conditions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub condition_count: Option<Hex>,
     /// Condition id.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub condition_id: Option<Hex>,
+    /// Opaque event data.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<Hex>,
+    /// Event id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub event_id: Option<Hex>,
+    /// Fee in basis points.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fee_bips: Option<Hex>,
+    /// Position / slot index.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index: Option<Hex>,
+    /// Legacy condition id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub legacy_condition_id: Option<Hex>,
+    /// Legacy event id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub legacy_event_id: Option<Hex>,
+    /// Combinatorial legs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub legs: Option<Vec<Hex>>,
+    /// Market id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub market_id: Option<Hex>,
     /// Oracle address.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub oracle: Option<Hex>,
@@ -230,6 +335,15 @@ pub struct LifecyclePayload {
     /// Question id.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub question_id: Option<Hex>,
+    /// First outcome token id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token0: Option<Hex>,
+    /// Second outcome token id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token1: Option<Hex>,
+    /// v2 condition id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub v2_condition_id: Option<Hex>,
 }
 
 event_type_enum!(
@@ -252,21 +366,39 @@ pub struct PositionsPayload {
     /// Event discriminator.
     #[serde(rename = "type")]
     pub kind: PositionsEventType,
+    /// Amount involved.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub amount: Option<Hex>,
     /// Amounts involved.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub amounts: Option<Vec<Hex>>,
+    /// Collateral token address.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub collateral_token: Option<Hex>,
     /// Condition id.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub condition_id: Option<Hex>,
+    /// Index sets redeemed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index_sets: Option<Vec<Hex>>,
     /// Initiating address.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub initiator: Option<Hex>,
+    /// Parent collection id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_collection_id: Option<Hex>,
+    /// Partition of index sets.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub partition: Option<Vec<Hex>>,
     /// Payout amount.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub payout: Option<Hex>,
-    /// ERC-1155 token id.
+    /// Redeeming address.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub token_id: Option<Hex>,
+    pub redeemer: Option<Hex>,
+    /// Stakeholder address.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stakeholder: Option<Hex>,
 }
 
 event_type_enum!(
@@ -311,21 +443,120 @@ pub struct CombosPayload {
     /// Amount.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub amount: Option<Hex>,
+    /// Collateral amount out.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub amount_out: Option<Hex>,
+    /// Amounts involved.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub amounts: Option<Vec<Hex>>,
+    /// Child NO condition id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub child_no_condition_id: Option<Hex>,
+    /// Child YES condition id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub child_yes_condition_id: Option<Hex>,
+    /// Collateral amount out.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub collateral_out: Option<Hex>,
+    /// Combinatorial position id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub combinatorial_position_id: Option<Hex>,
     /// Condition id.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub condition_id: Option<Hex>,
+    /// Condition index.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub condition_index: Option<Hex>,
+    /// Event id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub event_id: Option<Hex>,
     /// Sender address.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub from: Option<Hex>,
-    /// Token / position id.
+    /// Full condition id.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub id: Option<Hex>,
-    /// Operator address.
+    pub full_condition_id: Option<Hex>,
+    /// Index set.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub operator: Option<Hex>,
+    pub index_set: Option<Hex>,
+    /// Initiating address.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub initiator: Option<Hex>,
+    /// Legacy condition id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub legacy_condition_id: Option<Hex>,
+    /// Legacy payout for outcome 0.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub legacy_payout0: Option<Hex>,
+    /// Legacy payout for outcome 1.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub legacy_payout1: Option<Hex>,
+    /// Legacy token address.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub legacy_token: Option<Hex>,
+    /// Market id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub market_id: Option<Hex>,
+    /// New position id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_position_id: Option<Hex>,
+    /// Old position id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub old_position_id: Option<Hex>,
+    /// Outcome index.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outcome_index: Option<Hex>,
+    /// Parent condition id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_condition_id: Option<Hex>,
+    /// Payout amount.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payout: Option<Hex>,
+    /// Position amount.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub position_amount: Option<Hex>,
+    /// Position id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub position_id: Option<Hex>,
+    /// Position ids.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub position_ids: Option<Vec<Hex>>,
+    /// Recipient address.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recipient: Option<Hex>,
+    /// First recipient address.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recipient0: Option<Hex>,
+    /// Second recipient address.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recipient1: Option<Hex>,
+    /// Reduced condition id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reduced_condition_id: Option<Hex>,
+    /// Residual condition id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub residual_condition_id: Option<Hex>,
+    /// Result for outcome 0.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result0: Option<Hex>,
+    /// Result for outcome 1.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result1: Option<Hex>,
+    /// Stakeholder address.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stakeholder: Option<Hex>,
     /// Recipient address.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub to: Option<Hex>,
+    /// Underlying position id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub underlying_position_id: Option<Hex>,
+    /// User address.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user: Option<Hex>,
+    /// Vault address.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vault: Option<Hex>,
 }
 
 event_type_enum!(
@@ -358,13 +589,13 @@ pub struct TransfersPayload {
     pub id: Option<Hex>,
     /// Amount moved (`TransferSingle`).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub value: Option<Hex>,
+    pub amount: Option<Hex>,
     /// Token ids (`TransferBatch`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ids: Option<Vec<Hex>>,
     /// Amounts moved (`TransferBatch`).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub values: Option<Vec<Hex>>,
+    pub amounts: Option<Vec<Hex>>,
 }
 
 event_type_enum!(
@@ -389,7 +620,13 @@ pub struct AccountsPayload {
     /// The owner controlling the proxy wallet.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner: Option<Hex>,
-    /// Proxy implementation address.
+    /// Account / proxy id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<Hex>,
+    /// Proxy implementation contract address.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub implementation: Option<Hex>,
+    /// Created proxy address.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub proxy: Option<Hex>,
 }
