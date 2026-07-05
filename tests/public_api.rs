@@ -12,7 +12,7 @@ fn builder_requires_api_key() {
 #[test]
 fn builder_applies_overrides() {
     let radion = Radion::builder()
-        .api_key("rk_test")
+        .api_key("sk_test")
         .ws_url("wss://example.test/ws")
         .build()
         .expect("builds");

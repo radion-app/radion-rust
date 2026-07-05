@@ -11,7 +11,7 @@
 //! use radion_sdk::{Radion, realtime::{Channel, Payload, Subscription}};
 //!
 //! # async fn run() -> anyhow::Result<()> {
-//! let radion = Radion::builder().api_key("rk_...").build()?;
+//! let radion = Radion::builder().api_key("sk_...").build()?;
 //! radion.realtime.connect().await?;
 //!
 //! let mut trades = radion.realtime.subscribe(Subscription::new("trading", Channel::Trading)).await?;

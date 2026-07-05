@@ -1,7 +1,7 @@
 //! Subscribe with server-side filters.
 //!
 //! ```sh
-//! RADION_API_KEY=rk_... cargo run --example filters
+//! RADION_API_KEY=sk_... cargo run --example filters
 //! ```
 
 use futures_util::StreamExt;

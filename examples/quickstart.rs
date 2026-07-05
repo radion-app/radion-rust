@@ -1,7 +1,7 @@
 //! Connect, subscribe to trades, and print typed events.
 //!
 //! ```sh
-//! RADION_API_KEY=rk_... cargo run --example quickstart
+//! RADION_API_KEY=sk_... cargo run --example quickstart
 //! ```
 
 use futures_util::StreamExt;

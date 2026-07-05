@@ -34,7 +34,7 @@ impl Radion {
 /// ```no_run
 /// # fn main() -> anyhow::Result<()> {
 /// let radion = radion_sdk::Radion::builder()
-///     .api_key("rk_...")
+///     .api_key("sk_...")
 ///     .build()?;
 /// # Ok(())
 /// # }

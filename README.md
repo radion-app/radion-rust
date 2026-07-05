@@ -79,7 +79,7 @@ Build a client with [`Radion::builder`]:
 | `.ws_url(url)` | Override the realtime endpoint. Defaults to `wss://api.radion.app/ws`. |
 
 ```rust,no_run
-let radion = radion_sdk::Radion::builder().api_key("rk_...").build()?;
+let radion = radion_sdk::Radion::builder().api_key("sk_...").build()?;
 # Ok::<(), radion_sdk::RadionError>(())
 ```
 
