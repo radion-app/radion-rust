@@ -1,6 +1,6 @@
 //! Integration tests exercising the public API surface (no network).
 
-use radion_sdk::realtime::{Channel, ChannelFilters, Subscription};
+use radion_sdk::realtime::{Channel, ChannelFilters, ClobChannel, Subscription};
 use radion_sdk::{Radion, RadionError};
 
 #[test]
@@ -28,6 +28,25 @@ fn subscription_filter_validation_is_public() {
         Subscription::new("w", Channel::Wallets)
             .with_filters(ChannelFilters {
                 wallets: Some(vec!["0x1".into()]),
+                ..Default::default()
+            })
+            .validate()
+            .is_ok()
+    );
+}
+
+#[test]
+fn clob_channels_are_first_class_and_require_token_ids() {
+    // A clob channel is a first-class subscribable channel requiring token_ids.
+    assert!(
+        Subscription::new("book", ClobChannel::Book)
+            .validate()
+            .is_err()
+    );
+    assert!(
+        Subscription::new("book", ClobChannel::Book)
+            .with_filters(ChannelFilters {
+                token_ids: Some(vec!["1".into()]),
                 ..Default::default()
             })
             .validate()

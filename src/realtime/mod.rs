@@ -12,15 +12,17 @@ mod protocol;
 mod reconnect;
 mod subscription;
 
-pub use channels::{CHANNELS, Channel, FilterKey, SubscribableChannel};
+pub use channels::{CHANNELS, CLOB_CHANNELS, Channel, ClobChannel, FilterKey, SubscribableChannel};
 pub use client::{
     ChannelEventStream, HeartbeatOptions, LifecycleEvent, LifecycleStream, RealtimeClient,
     RealtimeOptions,
 };
 pub use payloads::{
-    AccountsEventType, AccountsPayload, CombosEventType, CombosPayload, FeesEventType, FeesPayload,
-    Hex, LifecycleEventType, LifecyclePayload, OracleEventType, OraclePayload, Payload,
-    PositionsEventType, PositionsPayload, ResolutionEventType, ResolutionPayload, TradingEventType,
+    AccountsEventType, AccountsPayload, ClobBestBidAskPayload, ClobBookPayload,
+    ClobLastTradePayload, ClobMidpointPayload, ClobPricesPayload, ClobTickSizePayload,
+    CombosEventType, CombosPayload, FeesEventType, FeesPayload, Hex, Level, LifecycleEventType,
+    LifecyclePayload, OracleEventType, OraclePayload, Payload, PositionsEventType,
+    PositionsPayload, PriceChange, ResolutionEventType, ResolutionPayload, TradingEventType,
     TradingPayload, TransfersEventType, TransfersPayload,
 };
 pub use protocol::{ChannelEvent, ChannelFilters, Subscription};

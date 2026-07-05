@@ -2,9 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::channels::{
-    Channel, FilterKey, SubscribableChannel, filter_requirement, join_filter_keys,
-};
+use super::channels::{Channel, ClobChannel, FilterKey, SubscribableChannel, join_filter_keys};
 use super::payloads::Payload;
 use crate::error::{RadionError, Result};
 
@@ -20,7 +18,7 @@ pub struct ChannelFilters {
     /// Condition / market ids to match (required by `markets`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub market_ids: Option<Vec<String>>,
-    /// ERC-1155 token ids to match (required by `markets`).
+    /// ERC-1155 token ids to match (required by `markets` and every `clob.*`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token_ids: Option<Vec<String>>,
     /// Minimum trade notional in USD (optional on `trading`).
@@ -44,12 +42,13 @@ impl ChannelFilters {
 ///
 /// `id` is a client-defined string echoed back on acknowledgements and on every
 /// event frame, so multiple subscriptions to the same channel can be told
-/// apart. `channel` is a confirmed channel or its `mempool.` companion.
+/// apart. `channel` is a confirmed topic channel, its `mempool.` companion, or a
+/// CLOB channel.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Subscription {
     /// Client-defined id, echoed back on confirmations and event frames.
     pub id: String,
-    /// Channel name, confirmed or `mempool.`-prefixed.
+    /// Channel name: topic, `mempool.`-prefixed, or `clob.`-prefixed.
     pub channel: SubscribableChannel,
     /// Optional server-side filters.
     pub filters: Option<ChannelFilters>,
@@ -77,10 +76,10 @@ impl Subscription {
     /// # Errors
     ///
     /// Returns [`RadionError::Connection`] describing the first violation.
-    /// Mempool companions share their confirmed channel's requirements.
+    /// Mempool companions share their confirmed channel's requirements; every
+    /// CLOB channel requires a `token_ids` filter.
     pub fn validate(&self) -> Result<()> {
-        let confirmed = self.channel.confirmed();
-        let Some(requirement) = filter_requirement(confirmed) else {
+        let Some(requirement) = self.channel.filter_requirement() else {
             return Ok(());
         };
         let satisfied = requirement
@@ -186,14 +185,17 @@ impl InboundFrame {
         let Self::Event { id, channel, data } = self else {
             return None;
         };
-        let confirmed = channel
-            .strip_prefix("mempool.")
-            .unwrap_or(&channel)
-            .parse::<Channel>()
-            .ok();
-        let payload = match confirmed {
-            Some(channel) => Payload::from_channel(channel, data),
-            None => Payload::Other(data),
+        let payload = if let Ok(clob) = channel.parse::<ClobChannel>() {
+            Payload::from_clob_channel(clob, data)
+        } else {
+            match channel
+                .strip_prefix("mempool.")
+                .unwrap_or(&channel)
+                .parse::<Channel>()
+            {
+                Ok(topic) => Payload::from_channel(topic, data),
+                Err(_) => Payload::Other(data),
+            }
         };
         Some(ChannelEvent {
             id,
@@ -206,6 +208,7 @@ impl InboundFrame {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::realtime::channels::ClobChannel;
     use crate::realtime::payloads::{Payload, TradingEventType};
 
     #[test]
@@ -227,6 +230,35 @@ mod tests {
 
         // `trading` requires nothing.
         assert!(Subscription::new("t", Channel::Trading).validate().is_ok());
+
+        // Every clob channel requires token_ids.
+        assert!(
+            Subscription::new("b", ClobChannel::Book)
+                .validate()
+                .is_err()
+        );
+        let clob = Subscription::new("b", ClobChannel::Book).with_filters(ChannelFilters {
+            token_ids: Some(vec!["1".into()]),
+            ..Default::default()
+        });
+        assert!(clob.validate().is_ok());
+    }
+
+    #[test]
+    fn parses_and_types_clob_event_frames() {
+        let raw = r#"{"type":"event","id":"mid","channel":"clob.midpoint","data":{"asset_id":"7","market":"0xm","midpoint":0.5,"timestamp":1}}"#;
+        let event = parse_inbound_frame(raw)
+            .expect("valid frame")
+            .into_channel_event()
+            .expect("event");
+        assert_eq!(event.channel, "clob.midpoint");
+        match event.data {
+            Payload::ClobMidpoint(mid) => {
+                assert_eq!(mid.asset_id, "7");
+                assert_eq!(mid.midpoint, 0.5);
+            }
+            other => panic!("expected clob midpoint payload, got {other:?}"),
+        }
     }
 
     #[test]

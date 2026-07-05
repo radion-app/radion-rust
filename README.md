@@ -128,8 +128,29 @@ on it for compile-time exhaustiveness. Unknown channels or event types are
 preserved as `Payload::Other(serde_json::Value)`.
 
 Filter high-volume order flow by size with `min_usd` on `Trading` (there is no
-separate large-trades channel). Every channel also has a `mempool.`-prefixed
+separate large-trades channel). Every topic channel also has a `mempool.`-prefixed
 companion for speculative pending transactions.
+
+### CLOB channels
+
+The CLOB (central limit order book) family is a first-class, separate set of
+subscribable channels. `ClobChannel` enumerates the six — `Book`, `Prices`,
+`LastTrade`, `Midpoint`, `TickSize`, `BestBidAsk` (wire names `clob.book`,
+`clob.prices`, `clob.last_trade`, `clob.midpoint`, `clob.tick_size`,
+`clob.best_bid_ask`) — and `CLOB_CHANNELS` is the full array. Unlike topic
+channels, each CLOB channel **requires** a `token_ids` filter and has **no**
+`mempool.` companion. Each carries one fixed payload (`Payload::ClobBook`,
+`ClobPrices`, `ClobLastTrade`, `ClobMidpoint`, `ClobTickSize`, `ClobBestBidAsk`)
+with no event `type` discriminator.
+
+```rust,no_run
+use radion_sdk::realtime::{ChannelFilters, ClobChannel, Subscription};
+
+let book = Subscription::new("book", ClobChannel::Book).with_filters(ChannelFilters {
+    token_ids: Some(vec!["71321...".into()]),
+    ..Default::default()
+});
+```
 
 ### Lifecycle events
 

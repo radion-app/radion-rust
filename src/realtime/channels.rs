@@ -87,30 +87,117 @@ impl FromStr for Channel {
     }
 }
 
+/// A CLOB (central limit order book) channel the SDK can subscribe to.
+///
+/// The CLOB family is separate from the topic [`Channel`] set: names are
+/// `clob.`-prefixed, each subscription requires at least one `token_id`, and no
+/// channel has a `mempool.` companion. Each CLOB channel carries one fixed
+/// payload shape with no event `type` discriminator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ClobChannel {
+    /// Full order book snapshots and updates.
+    Book,
+    /// Per-asset price changes.
+    Prices,
+    /// Last trade prints.
+    LastTrade,
+    /// Order book midpoint.
+    Midpoint,
+    /// Minimum price increment.
+    TickSize,
+    /// Best bid and ask.
+    BestBidAsk,
+}
+
+/// Every CLOB channel, in declaration order.
+pub const CLOB_CHANNELS: [ClobChannel; 6] = [
+    ClobChannel::Book,
+    ClobChannel::Prices,
+    ClobChannel::LastTrade,
+    ClobChannel::Midpoint,
+    ClobChannel::TickSize,
+    ClobChannel::BestBidAsk,
+];
+
+impl ClobChannel {
+    /// The wire name of this channel (e.g. `"clob.book"`).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Book => "clob.book",
+            Self::Prices => "clob.prices",
+            Self::LastTrade => "clob.last_trade",
+            Self::Midpoint => "clob.midpoint",
+            Self::TickSize => "clob.tick_size",
+            Self::BestBidAsk => "clob.best_bid_ask",
+        }
+    }
+}
+
+impl fmt::Display for ClobChannel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for ClobChannel {
+    type Err = RadionError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        CLOB_CHANNELS
+            .into_iter()
+            .find(|channel| channel.as_str() == value)
+            .ok_or_else(|| RadionError::connection(format!("unknown clob channel \"{value}\"")))
+    }
+}
+
 const MEMPOOL_PREFIX: &str = "mempool.";
+const CLOB_PREFIX: &str = "clob.";
 
 /// A channel name accepted by [`subscribe`](super::RealtimeClient::subscribe) —
-/// a confirmed channel or its `mempool.` companion emitting speculative pending
-/// transactions before block inclusion.
+/// a confirmed topic channel, its `mempool.` companion emitting speculative
+/// pending transactions before block inclusion, or a [`ClobChannel`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SubscribableChannel {
-    /// A confirmed channel.
+    /// A confirmed topic channel.
     Confirmed(Channel),
-    /// The `mempool.`-prefixed companion of a confirmed channel.
+    /// The `mempool.`-prefixed companion of a confirmed topic channel.
     Mempool(Channel),
+    /// A CLOB channel (no `mempool.` companion).
+    Clob(ClobChannel),
 }
 
 impl SubscribableChannel {
-    /// The confirmed channel underlying this subscription (mempool or not).
-    pub fn confirmed(&self) -> Channel {
+    /// The confirmed topic channel underlying this subscription (mempool or
+    /// not), or `None` for a CLOB channel.
+    pub fn confirmed(&self) -> Option<Channel> {
         match self {
-            Self::Confirmed(channel) | Self::Mempool(channel) => *channel,
+            Self::Confirmed(channel) | Self::Mempool(channel) => Some(*channel),
+            Self::Clob(_) => None,
         }
     }
 
     /// Whether this is a `mempool.` companion channel.
     pub fn is_mempool(&self) -> bool {
         matches!(self, Self::Mempool(_))
+    }
+
+    /// Whether this is a CLOB channel.
+    pub fn is_clob(&self) -> bool {
+        matches!(self, Self::Clob(_))
+    }
+
+    /// The filter requirement for this channel, if any. CLOB channels require a
+    /// `token_ids` filter; mempool companions share their confirmed channel's
+    /// requirements.
+    pub(crate) fn filter_requirement(&self) -> Option<FilterRequirement> {
+        match self {
+            Self::Confirmed(channel) | Self::Mempool(channel) => filter_requirement(*channel),
+            Self::Clob(_) => Some(FilterRequirement {
+                required_any_of: &[FilterKey::TokenIds],
+            }),
+        }
     }
 }
 
@@ -119,6 +206,7 @@ impl fmt::Display for SubscribableChannel {
         match self {
             Self::Confirmed(channel) => write!(f, "{channel}"),
             Self::Mempool(channel) => write!(f, "{MEMPOOL_PREFIX}{channel}"),
+            Self::Clob(channel) => write!(f, "{channel}"),
         }
     }
 }
@@ -127,16 +215,25 @@ impl FromStr for SubscribableChannel {
     type Err = RadionError;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value.strip_prefix(MEMPOOL_PREFIX) {
-            Some(rest) => rest.parse().map(Self::Mempool),
-            None => value.parse().map(Self::Confirmed),
+        if let Some(rest) = value.strip_prefix(MEMPOOL_PREFIX) {
+            return rest.parse().map(Self::Mempool);
         }
+        if value.starts_with(CLOB_PREFIX) {
+            return value.parse().map(Self::Clob);
+        }
+        value.parse().map(Self::Confirmed)
     }
 }
 
 impl From<Channel> for SubscribableChannel {
     fn from(channel: Channel) -> Self {
         Self::Confirmed(channel)
+    }
+}
+
+impl From<ClobChannel> for SubscribableChannel {
+    fn from(channel: ClobChannel) -> Self {
+        Self::Clob(channel)
     }
 }
 
@@ -220,8 +317,38 @@ mod tests {
         let mempool: SubscribableChannel = "mempool.trading".parse().unwrap();
         assert_eq!(mempool, SubscribableChannel::Mempool(Channel::Trading));
         assert_eq!(mempool.to_string(), "mempool.trading");
-        assert_eq!(mempool.confirmed(), Channel::Trading);
+        assert_eq!(mempool.confirmed(), Some(Channel::Trading));
         assert!(mempool.is_mempool());
+        assert!(!mempool.is_clob());
+    }
+
+    #[test]
+    fn clob_channel_roundtrips_through_str() {
+        for channel in CLOB_CHANNELS {
+            assert_eq!(channel.as_str().parse::<ClobChannel>().unwrap(), channel);
+        }
+        assert_eq!(
+            "clob.book".parse::<ClobChannel>().unwrap(),
+            ClobChannel::Book
+        );
+        assert_eq!(
+            "clob.best_bid_ask".parse::<ClobChannel>().unwrap(),
+            ClobChannel::BestBidAsk
+        );
+        assert!("clob.nope".parse::<ClobChannel>().is_err());
+    }
+
+    #[test]
+    fn subscribable_channel_handles_clob_prefix() {
+        let clob: SubscribableChannel = ClobChannel::LastTrade.into();
+        assert_eq!(clob, SubscribableChannel::Clob(ClobChannel::LastTrade));
+        assert_eq!(clob.to_string(), "clob.last_trade");
+        assert!(clob.is_clob());
+        assert!(!clob.is_mempool());
+        assert_eq!(clob.confirmed(), None);
+
+        let parsed: SubscribableChannel = "clob.book".parse().unwrap();
+        assert_eq!(parsed, SubscribableChannel::Clob(ClobChannel::Book));
     }
 
     #[test]
@@ -229,5 +356,13 @@ mod tests {
         assert!(filter_requirement(Channel::Markets).is_some());
         assert!(filter_requirement(Channel::Wallets).is_some());
         assert!(filter_requirement(Channel::Trading).is_none());
+
+        // Every clob channel requires token_ids.
+        for channel in CLOB_CHANNELS {
+            let requirement = SubscribableChannel::Clob(channel)
+                .filter_requirement()
+                .expect("clob requires a filter");
+            assert_eq!(requirement.required_any_of, &[FilterKey::TokenIds]);
+        }
     }
 }

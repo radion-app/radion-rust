@@ -4,6 +4,21 @@ All notable changes to `radion-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.1] - 2026-07-05
+
+### Added
+
+- **CLOB channels are now a first-class subscribable family.** `ClobChannel`
+  (`Book`, `Prices`, `LastTrade`, `Midpoint`, `TickSize`, `BestBidAsk`; wire
+  names `clob.book`, `clob.prices`, `clob.last_trade`, `clob.midpoint`,
+  `clob.tick_size`, `clob.best_bid_ask`) and the `CLOB_CHANNELS` array join
+  `SubscribableChannel` as a `Clob` variant. Each CLOB channel requires a
+  `token_ids` filter and has no `mempool.` companion. Added the typed payloads
+  `ClobBookPayload` (with `Level`), `ClobPricesPayload` (with `PriceChange`),
+  `ClobLastTradePayload`, `ClobMidpointPayload`, `ClobTickSizePayload`, and
+  `ClobBestBidAskPayload`, surfaced as `Payload::Clob*` variants (no event
+  `type` discriminator).
+
 ## [0.3.0] - 2026-07-04
 
 ### Changed

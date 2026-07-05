@@ -15,7 +15,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::channels::Channel;
+use super::channels::{Channel, ClobChannel};
 
 /// Hex-encoded string (`0x…`) or other opaque on-chain string value.
 pub type Hex = String;
@@ -394,13 +394,138 @@ pub struct AccountsPayload {
     pub proxy: Option<Hex>,
 }
 
+// -- CLOB channel payloads ---------------------------------------------------
+//
+// The CLOB family is proxied separately from the topic channels. Each channel
+// has ONE fixed `data` shape with NO `type` discriminator, and its fields are
+// wire-serialized in `snake_case`. Ids stay strings (`asset_id` is a U256
+// decimal string, `market` a `0x…` hex string); `timestamp` is a number; prices
+// and sizes are numbers, optional where the wire marks them optional.
+
+/// A single price level in a CLOB order book.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct Level {
+    /// Price of this level.
+    pub price: f64,
+    /// Size resting at this price.
+    pub size: f64,
+}
+
+/// `clob.book` payload: an order book snapshot for one asset.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct ClobBookPayload {
+    /// U256 outcome-token id as a decimal string.
+    pub asset_id: String,
+    /// Market condition id (`0x…` hex string).
+    pub market: String,
+    /// Server timestamp.
+    pub timestamp: i64,
+    /// Bid levels.
+    pub bids: Vec<Level>,
+    /// Ask levels.
+    pub asks: Vec<Level>,
+}
+
+/// `clob.last_trade` payload: the most recent trade print for one asset.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct ClobLastTradePayload {
+    /// U256 outcome-token id as a decimal string.
+    pub asset_id: String,
+    /// Market condition id (`0x…` hex string).
+    pub market: String,
+    /// Trade price.
+    pub price: f64,
+    /// Trade size.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<f64>,
+    /// Server timestamp.
+    pub timestamp: i64,
+}
+
+/// A single per-asset price change in a [`ClobPricesPayload`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct PriceChange {
+    /// U256 outcome-token id as a decimal string.
+    pub asset_id: String,
+    /// New price.
+    pub price: f64,
+    /// Size associated with the change.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<f64>,
+    /// Best bid after the change.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub best_bid: Option<f64>,
+    /// Best ask after the change.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub best_ask: Option<f64>,
+}
+
+/// `clob.prices` payload: a batch of per-asset price changes in one market.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct ClobPricesPayload {
+    /// Market condition id (`0x…` hex string).
+    pub market: String,
+    /// Server timestamp.
+    pub timestamp: i64,
+    /// The price changes in this batch.
+    pub changes: Vec<PriceChange>,
+}
+
+/// `clob.midpoint` payload: the order book midpoint for one asset.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct ClobMidpointPayload {
+    /// U256 outcome-token id as a decimal string.
+    pub asset_id: String,
+    /// Market condition id (`0x…` hex string).
+    pub market: String,
+    /// Midpoint price.
+    pub midpoint: f64,
+    /// Server timestamp.
+    pub timestamp: i64,
+}
+
+/// `clob.tick_size` payload: the minimum price increment for one asset.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct ClobTickSizePayload {
+    /// U256 outcome-token id as a decimal string.
+    pub asset_id: String,
+    /// Market condition id (`0x…` hex string).
+    pub market: String,
+    /// Server timestamp.
+    pub timestamp: i64,
+}
+
+/// `clob.best_bid_ask` payload: the top of book for one asset.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct ClobBestBidAskPayload {
+    /// U256 outcome-token id as a decimal string.
+    pub asset_id: String,
+    /// Market condition id (`0x…` hex string).
+    pub market: String,
+    /// Best bid price.
+    pub best_bid: f64,
+    /// Best ask price.
+    pub best_ask: f64,
+    /// Server timestamp.
+    pub timestamp: i64,
+}
+
 /// The typed payload carried by a channel event.
 ///
 /// The active variant is determined by the event frame's `channel` field. The
 /// `wallets` and `markets` filter channels re-emit confirmed payloads, so they
-/// deserialize to whichever confirmed variant matches its `type`. Unknown
-/// channels, unknown `type` values, or data that does not match any typed
-/// payload fall back to [`Payload::Other`].
+/// deserialize to whichever confirmed variant matches its `type`. CLOB channels
+/// map to their fixed payload shape (no `type` discriminator). Unknown channels,
+/// unknown `type` values, or data that does not match any typed payload fall
+/// back to [`Payload::Other`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 #[non_exhaustive]
@@ -423,42 +548,70 @@ pub enum Payload {
     Transfers(TransfersPayload),
     /// `accounts` payload.
     Accounts(AccountsPayload),
+    /// `clob.book` payload.
+    ClobBook(ClobBookPayload),
+    /// `clob.prices` payload.
+    ClobPrices(ClobPricesPayload),
+    /// `clob.last_trade` payload.
+    ClobLastTrade(ClobLastTradePayload),
+    /// `clob.midpoint` payload.
+    ClobMidpoint(ClobMidpointPayload),
+    /// `clob.tick_size` payload.
+    ClobTickSize(ClobTickSizePayload),
+    /// `clob.best_bid_ask` payload.
+    ClobBestBidAsk(ClobBestBidAskPayload),
     /// Any structurally valid payload the SDK does not type.
     Other(serde_json::Value),
 }
 
+/// Deserialize `data` into `T`, falling back to [`Payload::Other`] on mismatch.
+fn typed_payload<T, F>(data: serde_json::Value, wrap: F) -> Payload
+where
+    T: for<'de> Deserialize<'de>,
+    F: FnOnce(T) -> Payload,
+{
+    match serde_json::from_value::<T>(data.clone()) {
+        Ok(value) => wrap(value),
+        Err(_) => Payload::Other(data),
+    }
+}
+
 impl Payload {
-    /// Decode raw event `data` into the typed payload for `channel`.
+    /// Decode raw event `data` into the typed payload for a topic `channel`.
     ///
     /// Never fails: data that does not match the channel's typed shape is
     /// preserved as [`Payload::Other`].
     pub(crate) fn from_channel(channel: Channel, data: serde_json::Value) -> Self {
-        fn typed<T, F>(data: serde_json::Value, wrap: F) -> Payload
-        where
-            T: for<'de> Deserialize<'de>,
-            F: FnOnce(T) -> Payload,
-        {
-            match serde_json::from_value::<T>(data.clone()) {
-                Ok(value) => wrap(value),
-                Err(_) => Payload::Other(data),
-            }
-        }
-
         match channel {
-            Channel::Trading => typed(data, Payload::Trading),
-            Channel::Fees => typed(data, Payload::Fees),
-            Channel::Oracle => typed(data, Payload::Oracle),
-            Channel::Resolution => typed(data, Payload::Resolution),
-            Channel::Lifecycle => typed(data, Payload::Lifecycle),
-            Channel::Positions => typed(data, Payload::Positions),
-            Channel::Combos => typed(data, Payload::Combos),
-            Channel::Transfers => typed(data, Payload::Transfers),
-            Channel::Accounts => typed(data, Payload::Accounts),
+            Channel::Trading => typed_payload(data, Payload::Trading),
+            Channel::Fees => typed_payload(data, Payload::Fees),
+            Channel::Oracle => typed_payload(data, Payload::Oracle),
+            Channel::Resolution => typed_payload(data, Payload::Resolution),
+            Channel::Lifecycle => typed_payload(data, Payload::Lifecycle),
+            Channel::Positions => typed_payload(data, Payload::Positions),
+            Channel::Combos => typed_payload(data, Payload::Combos),
+            Channel::Transfers => typed_payload(data, Payload::Transfers),
+            Channel::Accounts => typed_payload(data, Payload::Accounts),
             // Filtered views re-emit confirmed payloads; the untagged enum picks
             // the variant whose `type` matches, preserving unknowns.
             Channel::Wallets | Channel::Markets => {
                 serde_json::from_value(data.clone()).unwrap_or(Payload::Other(data))
             }
+        }
+    }
+
+    /// Decode raw event `data` into the typed payload for a CLOB `channel`.
+    ///
+    /// Never fails: data that does not match the channel's fixed shape is
+    /// preserved as [`Payload::Other`].
+    pub(crate) fn from_clob_channel(channel: ClobChannel, data: serde_json::Value) -> Self {
+        match channel {
+            ClobChannel::Book => typed_payload(data, Payload::ClobBook),
+            ClobChannel::Prices => typed_payload(data, Payload::ClobPrices),
+            ClobChannel::LastTrade => typed_payload(data, Payload::ClobLastTrade),
+            ClobChannel::Midpoint => typed_payload(data, Payload::ClobMidpoint),
+            ClobChannel::TickSize => typed_payload(data, Payload::ClobTickSize),
+            ClobChannel::BestBidAsk => typed_payload(data, Payload::ClobBestBidAsk),
         }
     }
 }
@@ -509,6 +662,50 @@ mod tests {
         let data = json!({"type":"brand_new_event","foo":1});
         assert!(matches!(
             Payload::from_channel(Channel::Trading, data),
+            Payload::Other(_)
+        ));
+    }
+
+    #[test]
+    fn clob_book_types_a_snapshot() {
+        let data = json!({
+            "asset_id": "123",
+            "market": "0xabc",
+            "timestamp": 1_700_000_000_i64,
+            "bids": [{"price": 0.4, "size": 100.0}],
+            "asks": [{"price": 0.6, "size": 50.0}],
+        });
+        match Payload::from_clob_channel(ClobChannel::Book, data) {
+            Payload::ClobBook(book) => {
+                assert_eq!(book.asset_id, "123");
+                assert_eq!(book.market, "0xabc");
+                assert_eq!(book.bids.len(), 1);
+                assert_eq!(book.bids[0].price, 0.4);
+                assert_eq!(book.asks[0].size, 50.0);
+            }
+            other => panic!("expected clob book, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn clob_last_trade_size_is_optional() {
+        let data = json!({"asset_id":"9","market":"0xm","price":0.55,"timestamp":42});
+        match Payload::from_clob_channel(ClobChannel::LastTrade, data) {
+            Payload::ClobLastTrade(trade) => {
+                assert_eq!(trade.price, 0.55);
+                assert!(trade.size.is_none());
+                assert_eq!(trade.timestamp, 42);
+            }
+            other => panic!("expected clob last_trade, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn clob_payload_mismatch_falls_back_to_other() {
+        // A book payload is missing its required `bids`/`asks`.
+        let data = json!({"asset_id":"1","market":"0xm","timestamp":1});
+        assert!(matches!(
+            Payload::from_clob_channel(ClobChannel::Book, data),
             Payload::Other(_)
         ));
     }
