@@ -4,6 +4,15 @@ All notable changes to `radion-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.3] - 2026-07-05
+
+### Changed
+
+- **`Payload::Combos` and `Payload::Lifecycle` now box their inner payload**
+  (`Box<CombosPayload>` / `Box<LifecyclePayload>`) to shrink the `Payload` enum,
+  which the largest variants had inflated to 944 bytes. Callers matching these
+  variants must dereference the boxed value.
+
 ## [0.4.2] - 2026-07-05
 
 ### Fixed

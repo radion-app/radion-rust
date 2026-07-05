@@ -776,11 +776,11 @@ pub enum Payload {
     /// `resolution` payload.
     Resolution(ResolutionPayload),
     /// `lifecycle` payload.
-    Lifecycle(LifecyclePayload),
+    Lifecycle(Box<LifecyclePayload>),
     /// `positions` payload.
     Positions(PositionsPayload),
     /// `combos` payload.
-    Combos(CombosPayload),
+    Combos(Box<CombosPayload>),
     /// `transfers` payload.
     Transfers(TransfersPayload),
     /// `accounts` payload.
