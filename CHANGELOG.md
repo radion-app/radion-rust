@@ -4,6 +4,17 @@ All notable changes to `radion-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] - 2026-07-05
+
+### Added
+
+- **Public JWT auth flow.** `.token("...")` for a static user JWT or
+  `.token_provider(TokenProvider::new(...))` for a refreshable one, alongside a
+  `pk_jwt_` API key. The provider is called on every (re)connect, so tokens
+  never go stale.
+- **`.auth_in_query(true)`** to send credentials in the WS URL query string
+  instead of headers (proxies / gateways).
+
 ## [0.4.3] - 2026-07-05
 
 ### Changed

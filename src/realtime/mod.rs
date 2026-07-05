@@ -5,6 +5,7 @@
 //! [`ChannelEvent`]s. The client transparently reconnects, restores
 //! subscriptions, and heartbeats the connection.
 
+mod auth;
 mod channels;
 mod client;
 mod payloads;
@@ -12,6 +13,7 @@ mod protocol;
 mod reconnect;
 mod subscription;
 
+pub use auth::{TokenProvider, build_auth_query_url};
 pub use channels::{CHANNELS, CLOB_CHANNELS, Channel, ClobChannel, FilterKey, SubscribableChannel};
 pub use client::{
     ChannelEventStream, HeartbeatOptions, LifecycleEvent, LifecycleStream, RealtimeClient,

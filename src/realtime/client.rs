@@ -15,6 +15,7 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::header::{HeaderName, HeaderValue};
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
+use super::auth::{TokenProvider, build_auth_query_url};
 use super::protocol::{
     ChannelEvent, InboundFrame, OutboundFrame, Subscription, parse_inbound_frame,
 };
@@ -58,6 +59,12 @@ pub struct RealtimeOptions {
     pub reconnect: Option<ReconnectOptions>,
     /// Heartbeat policy, or `None` to disable heartbeats.
     pub heartbeat: Option<HeartbeatOptions>,
+    /// User JWT provider for the public-key (`pk_jwt_`) flow. `None` = secret
+    /// key. Resolved on every (re)connect.
+    pub token_provider: Option<TokenProvider>,
+    /// Send credentials in the URL query instead of headers. Defaults to
+    /// `false`; enable for header-stripping proxies or gateways.
+    pub auth_in_query: bool,
 }
 
 impl RealtimeOptions {
@@ -68,6 +75,8 @@ impl RealtimeOptions {
             url: DEFAULT_WS_URL.to_string(),
             reconnect: Some(ReconnectOptions::default()),
             heartbeat: Some(HeartbeatOptions::default()),
+            token_provider: None,
+            auth_in_query: false,
         }
     }
 
@@ -103,6 +112,27 @@ impl RealtimeOptions {
     #[must_use]
     pub fn disable_heartbeat(mut self) -> Self {
         self.heartbeat = None;
+        self
+    }
+
+    /// Set a static user JWT for the public-key (`pk_jwt_`) flow.
+    #[must_use]
+    pub fn token(mut self, token: impl Into<String>) -> Self {
+        self.token_provider = Some(TokenProvider::from_static(token));
+        self
+    }
+
+    /// Set a user JWT provider, called on every (re)connect for a fresh token.
+    #[must_use]
+    pub fn token_provider(mut self, provider: TokenProvider) -> Self {
+        self.token_provider = Some(provider);
+        self
+    }
+
+    /// Send credentials in the URL query string instead of headers.
+    #[must_use]
+    pub fn auth_in_query(mut self, enabled: bool) -> Self {
+        self.auth_in_query = enabled;
         self
     }
 }
@@ -426,24 +456,45 @@ async fn run(
     }
 }
 
-/// Open a WebSocket connection with the `X-API-Key` header set.
+/// Open a WebSocket connection, presenting the API key (and user JWT, if a token
+/// provider is set) either as headers or in the URL query string.
 async fn connect_ws(
     options: &RealtimeOptions,
 ) -> Result<
     impl Stream<Item = std::result::Result<Message, WsError>> + Sink<Message, Error = WsError> + Unpin,
 > {
-    let mut request = options
-        .url
-        .as_str()
-        .into_client_request()
-        .map_err(RadionError::transport)?;
-    let value = HeaderValue::from_str(&options.api_key).map_err(RadionError::transport)?;
-    request
-        .headers_mut()
-        .insert(HeaderName::from_static("x-api-key"), value);
-    let (ws, _response) = tokio_tungstenite::connect_async(request)
-        .await
-        .map_err(RadionError::transport)?;
+    let token = match &options.token_provider {
+        Some(provider) => Some(provider.fetch().await?),
+        None => None,
+    };
+
+    let (ws, _response) = if options.auth_in_query {
+        let url = build_auth_query_url(&options.url, &options.api_key, token.as_deref());
+        let request = url.into_client_request().map_err(RadionError::transport)?;
+        tokio_tungstenite::connect_async(request)
+            .await
+            .map_err(RadionError::transport)?
+    } else {
+        let mut request = options
+            .url
+            .as_str()
+            .into_client_request()
+            .map_err(RadionError::transport)?;
+        let api_key = HeaderValue::from_str(&options.api_key).map_err(RadionError::transport)?;
+        request
+            .headers_mut()
+            .insert(HeaderName::from_static("x-api-key"), api_key);
+        if let Some(token) = &token {
+            let bearer = HeaderValue::from_str(&format!("Bearer {token}"))
+                .map_err(RadionError::transport)?;
+            request
+                .headers_mut()
+                .insert(HeaderName::from_static("authorization"), bearer);
+        }
+        tokio_tungstenite::connect_async(request)
+            .await
+            .map_err(RadionError::transport)?
+    };
     Ok(ws)
 }
 
@@ -610,5 +661,35 @@ where
 {
     if let Ok(text) = serde_json::to_string(&frame) {
         let _ = ws.send(Message::text(text)).await;
+    }
+}
+
+#[cfg(test)]
+mod auth_wiring_tests {
+    use super::*;
+
+    #[test]
+    fn defaults_have_no_token_and_header_mode() {
+        let options = RealtimeOptions::new("k");
+        assert!(options.token_provider.is_none());
+        assert!(!options.auth_in_query);
+    }
+
+    #[tokio::test]
+    async fn static_token_builder_sets_provider() {
+        let options = RealtimeOptions::new("k").token("jwt");
+        let provider = options.token_provider.expect("provider set");
+        assert_eq!(provider.fetch().await.unwrap(), "jwt");
+    }
+
+    #[test]
+    fn auth_in_query_builder_flips_flag() {
+        assert!(RealtimeOptions::new("k").auth_in_query(true).auth_in_query);
+    }
+
+    #[test]
+    fn accepts_async_provider() {
+        let _ = RealtimeOptions::new("k")
+            .token_provider(TokenProvider::new(|| async { Ok("x".into()) }));
     }
 }

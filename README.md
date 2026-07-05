@@ -77,11 +77,35 @@ Build a client with [`Radion::builder`]:
 | `.api_key(key)` | Radion API key (required), sent as `X-API-Key`. |
 | `.base_url(url)` | Override the REST base URL. Defaults to `https://api.radion.app`. |
 | `.ws_url(url)` | Override the realtime endpoint. Defaults to `wss://api.radion.app/ws`. |
+| `.token(jwt)` / `.token_provider(p)` | User JWT for the `pk_jwt_` flow (see below). |
+| `.auth_in_query(true)` | Send credentials in the WS URL query string. |
 
 ```rust,no_run
 let radion = radion_sdk::Radion::builder().api_key("sk_...").build()?;
 # Ok::<(), radion_sdk::RadionError>(())
 ```
+
+### Authentication
+
+Two credential schemes, both keyed on the API key (sent as `X-API-Key`):
+
+- **Secret key** (`sk_` / `rk_`): `.api_key("sk_...")`.
+- **Public JWT** (`pk_jwt_`): pair the public key with a per-user JWT. Use
+  `.token_provider(...)` so a fresh JWT is fetched on every (re)connect:
+
+```rust,no_run
+use radion_sdk::realtime::TokenProvider;
+
+let radion = radion_sdk::Radion::builder()
+    .api_key("pk_jwt_...")
+    .token_provider(TokenProvider::new(|| async { Ok(fetch_user_jwt().await?) }))
+    .build()?;
+# Ok::<(), radion_sdk::RadionError>(())
+# async fn fetch_user_jwt() -> radion_sdk::error::Result<String> { Ok(String::new()) }
+```
+
+Use `.auth_in_query(true)` to move credentials into the WS URL query string —
+for a proxy or gateway that strips the `X-API-Key` / `Authorization` headers.
 
 ### Realtime client
 

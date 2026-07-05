@@ -44,6 +44,10 @@ pub struct RadionBuilder {
     api_key: Option<String>,
     base_url: Option<String>,
     ws_url: Option<String>,
+    #[cfg(feature = "realtime")]
+    token_provider: Option<crate::realtime::TokenProvider>,
+    #[cfg(feature = "realtime")]
+    auth_in_query: bool,
 }
 
 impl RadionBuilder {
@@ -68,6 +72,33 @@ impl RadionBuilder {
         self
     }
 
+    /// Set a static user JWT for the public-key (`pk_jwt_`) flow.
+    #[cfg(feature = "realtime")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "realtime")))]
+    #[must_use]
+    pub fn token(mut self, token: impl Into<String>) -> Self {
+        self.token_provider = Some(crate::realtime::TokenProvider::from_static(token));
+        self
+    }
+
+    /// Set a user JWT provider, called on every (re)connect for a fresh token.
+    #[cfg(feature = "realtime")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "realtime")))]
+    #[must_use]
+    pub fn token_provider(mut self, provider: crate::realtime::TokenProvider) -> Self {
+        self.token_provider = Some(provider);
+        self
+    }
+
+    /// Send credentials in the WS URL query string instead of headers.
+    #[cfg(feature = "realtime")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "realtime")))]
+    #[must_use]
+    pub fn auth_in_query(mut self, enabled: bool) -> Self {
+        self.auth_in_query = enabled;
+        self
+    }
+
     /// Build the [`Radion`] client.
     ///
     /// # Errors
@@ -87,14 +118,36 @@ impl RadionBuilder {
         };
 
         #[cfg(feature = "realtime")]
-        let realtime = crate::realtime::RealtimeClient::new(
-            crate::realtime::RealtimeOptions::new(api_key).url(config.ws_url.clone()),
-        );
+        let realtime = {
+            let mut options = crate::realtime::RealtimeOptions::new(api_key)
+                .url(config.ws_url.clone())
+                .auth_in_query(self.auth_in_query);
+            if let Some(provider) = self.token_provider {
+                options = options.token_provider(provider);
+            }
+            crate::realtime::RealtimeClient::new(options)
+        };
 
         Ok(Radion {
             config,
             #[cfg(feature = "realtime")]
             realtime,
         })
+    }
+}
+
+#[cfg(all(test, feature = "realtime"))]
+mod builder_tests {
+    use super::*;
+
+    #[test]
+    fn builder_accepts_token_and_query_flag() {
+        let radion = Radion::builder()
+            .api_key("pk_jwt_x")
+            .token("jwt")
+            .auth_in_query(true)
+            .build()
+            .expect("builds");
+        let _ = radion;
     }
 }
