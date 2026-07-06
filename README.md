@@ -125,8 +125,11 @@ Reached as `radion.realtime`, or constructed standalone with
 ### Subscriptions & filters
 
 `Subscription::new(id, channel)` takes a client-defined id (echoed back on every
-event) and a channel. Use `mempool.`-prefixed channels for speculative pending
-transactions: `"mempool.trading".parse::<SubscribableChannel>()?`.
+event) and a channel. Subscriptions default to the confirmed on-chain feed; call
+`.pending()` (or `.confirmed(false)`) for the speculative pending (mempool) feed:
+`Subscription::new("pending", Channel::Trading).pending()`. Pending events arrive
+on the same bare channel name and are told apart by `ChannelEvent.confirmed`;
+their `data` is a decoded transaction (`Payload::Mempool`).
 
 Attach server-side filters with `.with_filters(...)`. Some channels require a
 filter — `wallets` needs `wallets`, `markets` needs `market_ids` or `token_ids`.
@@ -152,8 +155,10 @@ on it for compile-time exhaustiveness. Unknown channels or event types are
 preserved as `Payload::Other(serde_json::Value)`.
 
 Filter high-volume order flow by size with `min_usd` on `Trading` (there is no
-separate large-trades channel). Every topic channel also has a `mempool.`-prefixed
-companion for speculative pending transactions.
+separate large-trades channel). On the confirmed feed `min_usd` is the actual
+filled USD; on the pending feed it is the intended fill notional
+(`call.notional_usd`). Every topic channel also has a pending (mempool) feed,
+selected with `.pending()` on the subscription.
 
 ### CLOB channels
 
@@ -163,7 +168,7 @@ subscribable channels. `ClobChannel` enumerates the six — `Book`, `Prices`,
 `clob.prices`, `clob.last_trade`, `clob.midpoint`, `clob.tick_size`,
 `clob.best_bid_ask`) — and `CLOB_CHANNELS` is the full array. Unlike topic
 channels, each CLOB channel **requires** a `token_ids` filter and has **no**
-`mempool.` companion. Each carries one fixed payload (`Payload::ClobBook`,
+pending feed. Each carries one fixed payload (`Payload::ClobBook`,
 `ClobPrices`, `ClobLastTrade`, `ClobMidpoint`, `ClobTickSize`, `ClobBestBidAsk`)
 with no event `type` discriminator.
 
@@ -188,6 +193,7 @@ while let Some(event) = lifecycle.next().await {
         LifecycleEvent::Open => {}
         LifecycleEvent::Close { code, reason } => {}
         LifecycleEvent::Reconnect { attempt, delay } => {}
+        LifecycleEvent::Warning { code, message, .. } => eprintln!("warning {code}: {message}"),
         LifecycleEvent::Error(err) => eprintln!("{err}"),
         _ => {}
     }

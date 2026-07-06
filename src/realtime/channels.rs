@@ -7,7 +7,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::RadionError;
 
-/// A confirmed channel the SDK can subscribe to.
+/// A topic channel the SDK can subscribe to.
+///
+/// Each topic channel has both a confirmed feed (on-chain events) and a pending
+/// feed (mempool transactions before block inclusion). Pick the feed with the
+/// `confirmed` flag on the [`Subscription`](super::Subscription), not the channel
+/// name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
@@ -36,7 +41,7 @@ pub enum Channel {
     Markets,
 }
 
-/// Every confirmed channel, in declaration order.
+/// Every topic channel, in declaration order.
 pub const CHANNELS: [Channel; 11] = [
     Channel::Trading,
     Channel::Fees,
@@ -91,7 +96,7 @@ impl FromStr for Channel {
 ///
 /// The CLOB family is separate from the topic [`Channel`] set: names are
 /// `clob.`-prefixed, each subscription requires at least one `token_id`, and no
-/// channel has a `mempool.` companion. Each CLOB channel carries one fixed
+/// channel has a pending feed. Each CLOB channel carries one fixed
 /// payload shape with no event `type` discriminator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -152,35 +157,29 @@ impl FromStr for ClobChannel {
     }
 }
 
-const MEMPOOL_PREFIX: &str = "mempool.";
 const CLOB_PREFIX: &str = "clob.";
 
 /// A channel name accepted by [`subscribe`](super::RealtimeClient::subscribe) —
-/// a confirmed topic channel, its `mempool.` companion emitting speculative
-/// pending transactions before block inclusion, or a [`ClobChannel`].
+/// a topic [`Channel`] or a [`ClobChannel`].
+///
+/// The confirmed / pending distinction is no longer part of the
+/// channel name: it lives on the [`Subscription`](super::Subscription)'s
+/// `confirmed` flag. There is no `mempool.` prefix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SubscribableChannel {
-    /// A confirmed topic channel.
-    Confirmed(Channel),
-    /// The `mempool.`-prefixed companion of a confirmed topic channel.
-    Mempool(Channel),
-    /// A CLOB channel (no `mempool.` companion).
+    /// A topic channel (confirmed or pending, chosen per subscription).
+    Topic(Channel),
+    /// A CLOB channel (confirmed only; no pending feed).
     Clob(ClobChannel),
 }
 
 impl SubscribableChannel {
-    /// The confirmed topic channel underlying this subscription (mempool or
-    /// not), or `None` for a CLOB channel.
-    pub fn confirmed(&self) -> Option<Channel> {
+    /// The underlying topic channel, or `None` for a CLOB channel.
+    pub fn topic(&self) -> Option<Channel> {
         match self {
-            Self::Confirmed(channel) | Self::Mempool(channel) => Some(*channel),
+            Self::Topic(channel) => Some(*channel),
             Self::Clob(_) => None,
         }
-    }
-
-    /// Whether this is a `mempool.` companion channel.
-    pub fn is_mempool(&self) -> bool {
-        matches!(self, Self::Mempool(_))
     }
 
     /// Whether this is a CLOB channel.
@@ -189,11 +188,10 @@ impl SubscribableChannel {
     }
 
     /// The filter requirement for this channel, if any. CLOB channels require a
-    /// `token_ids` filter; mempool companions share their confirmed channel's
-    /// requirements.
+    /// `token_ids` filter; topic channels carry their own requirements.
     pub(crate) fn filter_requirement(&self) -> Option<FilterRequirement> {
         match self {
-            Self::Confirmed(channel) | Self::Mempool(channel) => filter_requirement(*channel),
+            Self::Topic(channel) => filter_requirement(*channel),
             Self::Clob(_) => Some(FilterRequirement {
                 required_any_of: &[FilterKey::TokenIds],
             }),
@@ -204,8 +202,7 @@ impl SubscribableChannel {
 impl fmt::Display for SubscribableChannel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Confirmed(channel) => write!(f, "{channel}"),
-            Self::Mempool(channel) => write!(f, "{MEMPOOL_PREFIX}{channel}"),
+            Self::Topic(channel) => write!(f, "{channel}"),
             Self::Clob(channel) => write!(f, "{channel}"),
         }
     }
@@ -215,19 +212,16 @@ impl FromStr for SubscribableChannel {
     type Err = RadionError;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        if let Some(rest) = value.strip_prefix(MEMPOOL_PREFIX) {
-            return rest.parse().map(Self::Mempool);
-        }
         if value.starts_with(CLOB_PREFIX) {
             return value.parse().map(Self::Clob);
         }
-        value.parse().map(Self::Confirmed)
+        value.parse().map(Self::Topic)
     }
 }
 
 impl From<Channel> for SubscribableChannel {
     fn from(channel: Channel) -> Self {
-        Self::Confirmed(channel)
+        Self::Topic(channel)
     }
 }
 
@@ -273,9 +267,9 @@ pub(crate) struct FilterRequirement {
     pub required_any_of: &'static [FilterKey],
 }
 
-/// The filter requirement for a confirmed channel, if any. Channels absent here
-/// accept no required filters. Mempool companions share their confirmed
-/// channel's requirements.
+/// The filter requirement for a topic channel, if any. Channels absent here
+/// accept no required filters. The requirement is the same for the confirmed and
+/// pending feeds.
 pub(crate) fn filter_requirement(channel: Channel) -> Option<FilterRequirement> {
     match channel {
         Channel::Markets => Some(FilterRequirement {
@@ -309,17 +303,17 @@ mod tests {
     }
 
     #[test]
-    fn subscribable_channel_handles_mempool_prefix() {
-        let confirmed: SubscribableChannel = Channel::Trading.into();
-        assert_eq!(confirmed.to_string(), "trading");
-        assert!(!confirmed.is_mempool());
+    fn subscribable_channel_wraps_a_bare_topic() {
+        let topic: SubscribableChannel = Channel::Trading.into();
+        assert_eq!(topic, SubscribableChannel::Topic(Channel::Trading));
+        assert_eq!(topic.to_string(), "trading");
+        assert_eq!(topic.topic(), Some(Channel::Trading));
+        assert!(!topic.is_clob());
 
-        let mempool: SubscribableChannel = "mempool.trading".parse().unwrap();
-        assert_eq!(mempool, SubscribableChannel::Mempool(Channel::Trading));
-        assert_eq!(mempool.to_string(), "mempool.trading");
-        assert_eq!(mempool.confirmed(), Some(Channel::Trading));
-        assert!(mempool.is_mempool());
-        assert!(!mempool.is_clob());
+        assert!("mempool.trading".parse::<SubscribableChannel>().is_err());
+
+        let parsed: SubscribableChannel = "trading".parse().unwrap();
+        assert_eq!(parsed, SubscribableChannel::Topic(Channel::Trading));
     }
 
     #[test]
@@ -344,8 +338,7 @@ mod tests {
         assert_eq!(clob, SubscribableChannel::Clob(ClobChannel::LastTrade));
         assert_eq!(clob.to_string(), "clob.last_trade");
         assert!(clob.is_clob());
-        assert!(!clob.is_mempool());
-        assert_eq!(clob.confirmed(), None);
+        assert_eq!(clob.topic(), None);
 
         let parsed: SubscribableChannel = "clob.book".parse().unwrap();
         assert_eq!(parsed, SubscribableChannel::Clob(ClobChannel::Book));

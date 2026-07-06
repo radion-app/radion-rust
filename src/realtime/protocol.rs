@@ -22,6 +22,9 @@ pub struct ChannelFilters {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token_ids: Option<Vec<String>>,
     /// Minimum trade notional in USD (optional on `trading`).
+    ///
+    /// On the confirmed feed this is the actual filled USD; on the pending feed
+    /// it is the intended fill notional (`call.notional_usd`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub min_usd: Option<f64>,
 }
@@ -42,24 +45,30 @@ impl ChannelFilters {
 ///
 /// `id` is a client-defined string echoed back on acknowledgements and on every
 /// event frame, so multiple subscriptions to the same channel can be told
-/// apart. `channel` is a confirmed topic channel, its `mempool.` companion, or a
-/// CLOB channel.
+/// apart. `channel` is a topic channel or a CLOB channel.
+///
+/// `confirmed` picks the feed: `true` (the default) streams confirmed on-chain
+/// events; `false` streams pending mempool transactions before block inclusion.
+/// It has no effect on CLOB channels, which have no pending feed.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Subscription {
     /// Client-defined id, echoed back on confirmations and event frames.
     pub id: String,
-    /// Channel name: topic, `mempool.`-prefixed, or `clob.`-prefixed.
+    /// Channel name: a topic channel or a `clob.`-prefixed channel.
     pub channel: SubscribableChannel,
+    /// Which feed to stream: `true` = confirmed (default), `false` = pending.
+    pub confirmed: bool,
     /// Optional server-side filters.
     pub filters: Option<ChannelFilters>,
 }
 
 impl Subscription {
-    /// Create a subscription with no filters.
+    /// Create a subscription with no filters, on the confirmed feed.
     pub fn new(id: impl Into<String>, channel: impl Into<SubscribableChannel>) -> Self {
         Self {
             id: id.into(),
             channel: channel.into(),
+            confirmed: true,
             filters: None,
         }
     }
@@ -71,13 +80,28 @@ impl Subscription {
         self
     }
 
+    /// Choose the feed: `true` = confirmed on-chain events, `false` = pending
+    /// mempool transactions. Ignored for CLOB channels.
+    #[must_use]
+    pub fn confirmed(mut self, confirmed: bool) -> Self {
+        self.confirmed = confirmed;
+        self
+    }
+
+    /// Stream the pending (mempool) feed instead of confirmed events. Shorthand
+    /// for [`confirmed(false)`](Self::confirmed).
+    #[must_use]
+    pub fn pending(self) -> Self {
+        self.confirmed(false)
+    }
+
     /// Validate that this subscription carries the filters its channel requires.
     ///
     /// # Errors
     ///
-    /// Returns [`RadionError::Connection`] describing the first violation.
-    /// Mempool companions share their confirmed channel's requirements; every
-    /// CLOB channel requires a `token_ids` filter.
+    /// Returns [`RadionError::Connection`] describing the first violation. The
+    /// requirement is the same for the confirmed and pending feeds; every CLOB
+    /// channel requires a `token_ids` filter.
     pub fn validate(&self) -> Result<()> {
         let Some(requirement) = self.channel.filter_requirement() else {
             return Ok(());
@@ -105,6 +129,8 @@ pub(crate) enum OutboundFrame {
         id: String,
         channel: SubscribableChannel,
         #[serde(skip_serializing_if = "Option::is_none")]
+        confirmed: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         filters: Option<ChannelFilters>,
     },
     Unsubscribe {
@@ -115,9 +141,11 @@ pub(crate) enum OutboundFrame {
 
 impl OutboundFrame {
     pub(crate) fn subscribe(subscription: &Subscription) -> Self {
+        let confirmed = subscription.channel.topic().map(|_| subscription.confirmed);
         Self::Subscribe {
             id: subscription.id.clone(),
             channel: subscription.channel,
+            confirmed,
             filters: subscription.filters.clone(),
         }
     }
@@ -125,15 +153,19 @@ impl OutboundFrame {
 
 /// A data event delivered on a subscribed channel.
 ///
-/// `id` identifies the subscription it belongs to; `channel` is the resolved
-/// channel name (possibly `mempool.`-prefixed). `data` is the typed payload —
-/// match on it to handle a specific event shape.
+/// `id` identifies the subscription it belongs to; `channel` is the bare channel
+/// name (same for both feeds). `confirmed` says which feed it came from: `true` =
+/// confirmed on-chain event, `false` = pending mempool transaction. Route by
+/// `id`, not by the channel name. `data` is the typed payload — match on it to
+/// handle a specific event shape.
 #[derive(Debug, Clone)]
 pub struct ChannelEvent {
     /// Subscription id this event belongs to.
     pub id: String,
-    /// Resolved channel name.
+    /// Bare channel name.
     pub channel: String,
+    /// Which feed this event came from: `true` = confirmed, `false` = pending.
+    pub confirmed: bool,
     /// Typed payload.
     pub data: Payload,
 }
@@ -145,6 +177,8 @@ pub(crate) enum InboundFrame {
     Event {
         id: String,
         channel: String,
+        #[serde(default = "confirmed_default")]
+        confirmed: bool,
         data: serde_json::Value,
     },
     Subscribed {
@@ -152,12 +186,19 @@ pub(crate) enum InboundFrame {
         id: String,
         #[allow(dead_code)]
         channel: Option<String>,
+        #[allow(dead_code)]
+        confirmed: Option<bool>,
     },
     Unsubscribed {
         #[allow(dead_code)]
         id: String,
         #[allow(dead_code)]
         channel: Option<String>,
+    },
+    Warning {
+        code: String,
+        id: Option<String>,
+        message: String,
     },
     Pong,
     Error {
@@ -170,6 +211,11 @@ pub(crate) enum InboundFrame {
     },
 }
 
+/// Default for a missing `confirmed` envelope field: confirmed feed.
+fn confirmed_default() -> bool {
+    true
+}
+
 /// Parse and validate a raw text frame into a typed [`InboundFrame`].
 ///
 /// Returns `None` when the payload is not valid JSON or does not match a known
@@ -180,26 +226,32 @@ pub(crate) fn parse_inbound_frame(raw: &str) -> Option<InboundFrame> {
 
 impl InboundFrame {
     /// Convert an `event` frame into a typed [`ChannelEvent`], decoding `data`
-    /// against the resolved channel. Returns `None` for non-event frames.
+    /// against the channel and the envelope's `confirmed` flag. Returns `None`
+    /// for non-event frames.
     pub(crate) fn into_channel_event(self) -> Option<ChannelEvent> {
-        let Self::Event { id, channel, data } = self else {
+        let Self::Event {
+            id,
+            channel,
+            confirmed,
+            data,
+        } = self
+        else {
             return None;
         };
         let payload = if let Ok(clob) = channel.parse::<ClobChannel>() {
             Payload::from_clob_channel(clob, data)
-        } else {
-            match channel
-                .strip_prefix("mempool.")
-                .unwrap_or(&channel)
-                .parse::<Channel>()
-            {
+        } else if confirmed {
+            match channel.parse::<Channel>() {
                 Ok(topic) => Payload::from_channel(topic, data),
                 Err(_) => Payload::Other(data),
             }
+        } else {
+            Payload::from_pending(data)
         };
         Some(ChannelEvent {
             id,
             channel,
+            confirmed,
             data: payload,
         })
     }
@@ -209,7 +261,7 @@ impl InboundFrame {
 mod tests {
     use super::*;
     use crate::realtime::channels::ClobChannel;
-    use crate::realtime::payloads::{Payload, TradingEventType};
+    use crate::realtime::payloads::{OrderSide, Payload, TradingEventType};
 
     #[test]
     fn validates_required_filters() {
@@ -274,16 +326,34 @@ mod tests {
             serde_json::from_str(&serde_json::to_string(&sub).unwrap()).unwrap();
         assert_eq!(json["action"], "subscribe");
         assert_eq!(json["channel"], "trading");
+        assert_eq!(json["confirmed"], true);
         // No filters key when none are set.
         assert!(json.get("filters").is_none());
+
+        let pending = OutboundFrame::subscribe(&Subscription::new("t", Channel::Trading).pending());
+        let json: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&pending).unwrap()).unwrap();
+        assert_eq!(json["channel"], "trading");
+        assert_eq!(json["confirmed"], false);
+
+        let clob = OutboundFrame::subscribe(
+            &Subscription::new("b", ClobChannel::Book).with_filters(ChannelFilters {
+                token_ids: Some(vec!["1".into()]),
+                ..Default::default()
+            }),
+        );
+        let json: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&clob).unwrap()).unwrap();
+        assert!(json.get("confirmed").is_none());
     }
 
     #[test]
-    fn parses_and_types_event_frames() {
-        let raw = r#"{"type":"event","id":"t","channel":"trading","data":{"type":"order_filled_v2","side":1,"tokenId":"0xabc"}}"#;
+    fn parses_and_types_confirmed_event_frames() {
+        let raw = r#"{"type":"event","id":"t","channel":"trading","confirmed":true,"data":{"type":"order_filled_v2","side":1,"tokenId":"0xabc"}}"#;
         let frame = parse_inbound_frame(raw).expect("valid frame");
         let event = frame.into_channel_event().expect("event");
         assert_eq!(event.id, "t");
+        assert!(event.confirmed);
         match event.data {
             Payload::Trading(trade) => {
                 assert_eq!(trade.kind, TradingEventType::OrderFilledV2);
@@ -295,13 +365,70 @@ mod tests {
     }
 
     #[test]
+    fn parses_and_types_pending_event_frames() {
+        let raw = r#"{"type":"event","id":"t","channel":"trading","confirmed":false,"data":{"seen_at_ms":1782027489000,"transaction_hash":"0xhash","from":"0xfrom","to":"0xto","contract_kinds":["exchange"],"method_selector":"0xabcdef12","input":"0xdead","value":"0","call":{"method":"fillOrder","market_ids":["0xm"],"token_ids":["7"],"wallets":["0xw"],"notional_usd":192.5,"orders":[{"maker":"0xa","taker":null,"token_id":"7","side":"buy","maker_amount":"100","taker_amount":"50"}]}}}"#;
+        let event = parse_inbound_frame(raw)
+            .expect("valid frame")
+            .into_channel_event()
+            .expect("event");
+        assert_eq!(event.channel, "trading");
+        assert!(!event.confirmed);
+        match event.data {
+            Payload::Mempool(tx) => {
+                assert_eq!(tx.transaction_hash, "0xhash");
+                assert_eq!(tx.from, "0xfrom");
+                let call = tx.call.expect("call present");
+                assert_eq!(call.method, "fillOrder");
+                assert_eq!(call.notional_usd, Some(192.5));
+                assert_eq!(call.orders.len(), 1);
+                assert_eq!(call.orders[0].side, OrderSide::Buy);
+                assert!(call.orders[0].taker.is_none());
+            }
+            other => panic!("expected mempool payload, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn missing_confirmed_defaults_to_confirmed_feed() {
+        let raw =
+            r#"{"type":"event","id":"t","channel":"trading","data":{"type":"order_cancelled"}}"#;
+        let event = parse_inbound_frame(raw)
+            .unwrap()
+            .into_channel_event()
+            .unwrap();
+        assert!(event.confirmed);
+    }
+
+    #[test]
     fn unknown_channel_falls_back_to_other() {
-        let raw = r#"{"type":"event","id":"m","channel":"mempool.unknownz","data":{"foo":1}}"#;
+        let raw =
+            r#"{"type":"event","id":"m","channel":"unknownz","confirmed":true,"data":{"foo":1}}"#;
         let event = parse_inbound_frame(raw)
             .unwrap()
             .into_channel_event()
             .unwrap();
         assert!(matches!(event.data, Payload::Other(_)));
+    }
+
+    #[test]
+    fn parses_warning_frame() {
+        let raw = r#"{"type":"warning","code":"mempool_unavailable","id":"t","message":"no pending stream"}"#;
+        assert!(matches!(
+            parse_inbound_frame(raw),
+            Some(InboundFrame::Warning { .. })
+        ));
+    }
+
+    #[test]
+    fn subscribed_ack_echoes_confirmed() {
+        let raw = r#"{"type":"subscribed","id":"t","channel":"trading","confirmed":false}"#;
+        assert!(matches!(
+            parse_inbound_frame(raw),
+            Some(InboundFrame::Subscribed {
+                confirmed: Some(false),
+                ..
+            })
+        ));
     }
 
     #[test]

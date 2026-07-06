@@ -157,6 +157,17 @@ pub enum LifecycleEvent {
         /// Delay before the attempt.
         delay: Duration,
     },
+    /// A non-fatal server `warning` frame — for example `mempool_unavailable`,
+    /// sent after a pending (`confirmed=false`) subscribe when the node has no
+    /// pending stream. Delivery continues; this is not an error.
+    Warning {
+        /// Machine-readable warning code (e.g. `mempool_unavailable`).
+        code: String,
+        /// Subscription id the warning refers to, if any.
+        id: Option<String>,
+        /// Human-readable message.
+        message: String,
+    },
     /// An error occurred: a server `error` frame, a transport failure, or a
     /// stale connection.
     Error(RadionError),
@@ -633,6 +644,9 @@ fn route_text(
             if let Some(event) = frame.into_channel_event() {
                 let _ = events_tx.send(event);
             }
+        }
+        InboundFrame::Warning { code, id, message } => {
+            let _ = lifecycle_tx.send(LifecycleEvent::Warning { code, id, message });
         }
         InboundFrame::Error {
             message,

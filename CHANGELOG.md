@@ -4,6 +4,38 @@ All notable changes to `radion-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] - 2026-07-06
+
+### Changed
+
+- **BREAKING: pending feed is now a flag, not a channel prefix.** The
+  `mempool.` channel prefix and `SubscribableChannel::Mempool` are gone.
+  Subscribe to the pending feed with a `confirmed` flag on the `Subscription`:
+  `Subscription::new(id, Channel::Trading).pending()` (or `.confirmed(false)`).
+  Subscriptions default to the confirmed feed (`confirmed = true`). The subscribe
+  frame now carries an optional `confirmed` field (default `true`); CLOB channels
+  omit it, as they have no pending feed. `SubscribableChannel` is now
+  `Topic(Channel)` / `Clob(ClobChannel)`, its `confirmed()` accessor is renamed
+  `topic()`, and `is_mempool()` is removed.
+- **BREAKING: unified event frame with envelope `confirmed`.** Confirmed and
+  pending events share one bare channel name; the feed is told apart by a
+  `confirmed` bool on the envelope, now surfaced as `ChannelEvent.confirmed`.
+  Route events by subscription `id`, not by a `mempool.`-prefixed channel string.
+- **BREAKING: pending payload dropped its inner `confirmed` field** (moved to the
+  envelope) and its trade `call.usd` is renamed `call.notional_usd`. Pending
+  transactions decode to the new `Payload::Mempool(MempoolPayload)`, whose `call`
+  (`MempoolCall`) now also carries an un-collapsed `orders` list
+  (`Vec<MempoolOrder>`, each with `maker` / `taker` / `token_id` / `side` /
+  `maker_amount` / `taker_amount`; `side` is the new `OrderSide` enum). `orders`
+  is empty for non-trade (positions / combos) calls.
+
+### Added
+
+- **`LifecycleEvent::Warning { code, id, message }`** for the new server
+  `warning` frame — for example `mempool_unavailable`, sent after a pending
+  subscribe when the node has no pending stream. It is non-fatal; delivery
+  continues.
+
 ## [0.5.0] - 2026-07-05
 
 ### Added

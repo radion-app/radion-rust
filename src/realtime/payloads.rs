@@ -631,6 +631,90 @@ pub struct AccountsPayload {
     pub proxy: Option<Hex>,
 }
 
+// -- Pending (mempool) payload -----------------------------------------------
+
+/// Side of a pending order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum OrderSide {
+    /// Buying the outcome token.
+    Buy,
+    /// Selling the outcome token.
+    Sell,
+}
+
+/// A single un-collapsed order within a pending trade [`MempoolCall`].
+///
+/// No `price` field yet.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct MempoolOrder {
+    /// Maker address.
+    pub maker: String,
+    /// Taker address, or `None` for v2 orders.
+    pub taker: Option<String>,
+    /// U256 outcome-token id as a decimal string.
+    pub token_id: String,
+    /// Whether the order buys or sells.
+    pub side: OrderSide,
+    /// Maker amount as a decimal string.
+    pub maker_amount: String,
+    /// Taker amount as a decimal string.
+    pub taker_amount: String,
+}
+
+/// The decoded contract call a pending transaction makes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct MempoolCall {
+    /// Contract method name.
+    pub method: String,
+    /// Condition / market ids the call touches.
+    #[serde(default)]
+    pub market_ids: Vec<String>,
+    /// ERC-1155 token ids the call touches (decimal strings).
+    #[serde(default)]
+    pub token_ids: Vec<String>,
+    /// Wallet addresses the call touches.
+    #[serde(default)]
+    pub wallets: Vec<String>,
+    /// Intended fill notional in USD, if the call is a trade.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notional_usd: Option<f64>,
+    /// Per-order detail for trade calls; empty for positions / combos.
+    #[serde(default)]
+    pub orders: Vec<MempoolOrder>,
+}
+
+/// A pending (mempool) transaction from the pending feed (`confirmed=false`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct MempoolPayload {
+    /// When Radion first saw the pending transaction (Unix ms).
+    pub seen_at_ms: u64,
+    /// The pending transaction hash (`0x…`).
+    pub transaction_hash: String,
+    /// Sender address (`0x…`).
+    pub from: String,
+    /// Polymarket contract that was called (`0x…`).
+    pub to: String,
+    /// Contract kinds of `to` (`exchange`, `oracle`, `ctf`, …); kept as strings
+    /// so unknown future kinds do not drop frames.
+    #[serde(default)]
+    pub contract_kinds: Vec<String>,
+    /// The 4-byte function selector (`0x…`), or `None` if the calldata is shorter.
+    #[serde(default)]
+    pub method_selector: Option<String>,
+    /// The decoded contract call, or `None` if the calldata is not a known call.
+    #[serde(default)]
+    pub call: Option<MempoolCall>,
+    /// The raw calldata (`0x…`).
+    pub input: String,
+    /// Native POL value sent with the transaction, as a decimal string.
+    pub value: String,
+}
+
 // -- CLOB channel payloads ---------------------------------------------------
 //
 // The CLOB family is proxied separately from the topic channels. Each channel
@@ -757,12 +841,14 @@ pub struct ClobBestBidAskPayload {
 
 /// The typed payload carried by a channel event.
 ///
-/// The active variant is determined by the event frame's `channel` field. The
-/// `wallets` and `markets` filter channels re-emit confirmed payloads, so they
-/// deserialize to whichever confirmed variant matches its `type`. CLOB channels
-/// map to their fixed payload shape (no `type` discriminator). Unknown channels,
-/// unknown `type` values, or data that does not match any typed payload fall
-/// back to [`Payload::Other`].
+/// The active variant is determined by the event frame's `channel` field and its
+/// `confirmed` flag. On the pending feed (`confirmed=false`) every topic channel
+/// maps to [`Payload::Mempool`]. On the confirmed feed the `wallets` and
+/// `markets` filter channels re-emit confirmed payloads, so they deserialize to
+/// whichever confirmed variant matches its `type`. CLOB channels map to their
+/// fixed payload shape (no `type` discriminator). Unknown channels, unknown
+/// `type` values, or data that does not match any typed payload fall back to
+/// [`Payload::Other`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 #[non_exhaustive]
@@ -785,6 +871,8 @@ pub enum Payload {
     Transfers(TransfersPayload),
     /// `accounts` payload.
     Accounts(AccountsPayload),
+    /// A pending (mempool) transaction, from the pending feed (`confirmed=false`).
+    Mempool(MempoolPayload),
     /// `clob.book` payload.
     ClobBook(ClobBookPayload),
     /// `clob.prices` payload.
@@ -835,6 +923,15 @@ impl Payload {
                 serde_json::from_value(data.clone()).unwrap_or(Payload::Other(data))
             }
         }
+    }
+
+    /// Decode raw pending-feed `data` (`confirmed=false`) into a typed
+    /// [`Payload::Mempool`].
+    ///
+    /// Never fails: data that does not match the pending shape is preserved as
+    /// [`Payload::Other`].
+    pub(crate) fn from_pending(data: serde_json::Value) -> Self {
+        typed_payload(data, Payload::Mempool)
     }
 
     /// Decode raw event `data` into the typed payload for a CLOB `channel`.
@@ -901,6 +998,84 @@ mod tests {
             Payload::from_channel(Channel::Trading, data),
             Payload::Other(_)
         ));
+    }
+
+    fn pending_envelope(call: serde_json::Value) -> serde_json::Value {
+        json!({
+            "seen_at_ms": 1_782_027_489_000u64,
+            "transaction_hash": "0xhash",
+            "from": "0xfrom",
+            "to": "0xto",
+            "contract_kinds": ["exchange"],
+            "method_selector": "0xabcdef12",
+            "call": call,
+            "input": "0xdead",
+            "value": "0",
+        })
+    }
+
+    #[test]
+    fn pending_types_a_decoded_transaction() {
+        let data = pending_envelope(json!({
+            "method": "fillOrders",
+            "market_ids": ["0xm"],
+            "token_ids": ["7"],
+            "wallets": ["0xw"],
+            "notional_usd": 192.5,
+            "orders": [{
+                "maker": "0xa",
+                "taker": null,
+                "token_id": "7",
+                "side": "sell",
+                "maker_amount": "100",
+                "taker_amount": "50",
+            }],
+        }));
+        match Payload::from_pending(data) {
+            Payload::Mempool(tx) => {
+                assert_eq!(tx.transaction_hash, "0xhash");
+                assert_eq!(tx.from, "0xfrom");
+                assert_eq!(tx.contract_kinds, vec!["exchange".to_string()]);
+                let call = tx.call.expect("call present");
+                assert_eq!(call.method, "fillOrders");
+                assert_eq!(call.market_ids, vec!["0xm".to_string()]);
+                assert_eq!(call.notional_usd, Some(192.5));
+                assert_eq!(call.orders.len(), 1);
+                assert_eq!(call.orders[0].side, OrderSide::Sell);
+                assert_eq!(call.orders[0].taker, None);
+                assert_eq!(call.orders[0].maker_amount, "100");
+            }
+            other => panic!("expected mempool, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pending_non_trade_call_has_empty_orders() {
+        let data = pending_envelope(json!({"method": "splitPosition", "notional_usd": null}));
+        match Payload::from_pending(data) {
+            Payload::Mempool(tx) => {
+                let call = tx.call.expect("call present");
+                assert!(call.orders.is_empty());
+                assert!(call.notional_usd.is_none());
+                assert!(call.token_ids.is_empty());
+            }
+            other => panic!("expected mempool, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pending_undecodable_call_is_null() {
+        let data = pending_envelope(serde_json::Value::Null);
+        match Payload::from_pending(data) {
+            Payload::Mempool(tx) => assert!(tx.call.is_none()),
+            other => panic!("expected mempool, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pending_without_envelope_falls_back_to_other() {
+        let data = json!({"foo": 1});
+        assert!(matches!(Payload::from_pending(data), Payload::Other(_)));
     }
 
     #[test]

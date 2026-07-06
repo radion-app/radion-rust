@@ -23,9 +23,9 @@ pub use payloads::{
     AccountsEventType, AccountsPayload, ClobBestBidAskPayload, ClobBookPayload,
     ClobLastTradePayload, ClobMidpointPayload, ClobPricesPayload, ClobTickSizePayload,
     CombosEventType, CombosPayload, FeesEventType, FeesPayload, Hex, Level, LifecycleEventType,
-    LifecyclePayload, OracleEventType, OraclePayload, Payload, PositionsEventType,
-    PositionsPayload, PriceChange, ResolutionEventType, ResolutionPayload, TradingEventType,
-    TradingPayload, TransfersEventType, TransfersPayload,
+    LifecyclePayload, MempoolCall, MempoolOrder, MempoolPayload, OracleEventType, OraclePayload,
+    OrderSide, Payload, PositionsEventType, PositionsPayload, PriceChange, ResolutionEventType,
+    ResolutionPayload, TradingEventType, TradingPayload, TransfersEventType, TransfersPayload,
 };
 pub use protocol::{ChannelEvent, ChannelFilters, Subscription};
 pub use reconnect::ReconnectOptions;
