@@ -156,8 +156,9 @@ impl OutboundFrame {
 /// `id` identifies the subscription it belongs to; `channel` is the bare channel
 /// name (same for both feeds). `confirmed` says which feed it came from: `true` =
 /// confirmed on-chain event, `false` = pending mempool transaction. Route by
-/// `id`, not by the channel name. `data` is the typed payload — match on it to
-/// handle a specific event shape.
+/// `id`, not by the channel name. `seq` and `sent_at_ms` describe the envelope:
+/// gap detection and server send time. `data` is the typed payload — match on it
+/// to handle a specific event shape.
 #[derive(Debug, Clone)]
 pub struct ChannelEvent {
     /// Subscription id this event belongs to.
@@ -166,6 +167,13 @@ pub struct ChannelEvent {
     pub channel: String,
     /// Which feed this event came from: `true` = confirmed, `false` = pending.
     pub confirmed: bool,
+    /// Per-connection monotonic counter, starting at 0 and incremented by one
+    /// for every event frame across all subscriptions. A jump means frames
+    /// were dropped.
+    pub seq: u64,
+    /// Unix milliseconds when the server sent the frame. Server→client latency
+    /// is your receive time (ms) minus `sent_at_ms`.
+    pub sent_at_ms: u64,
     /// Typed payload.
     pub data: Payload,
 }
@@ -179,6 +187,8 @@ pub(crate) enum InboundFrame {
         channel: String,
         #[serde(default = "confirmed_default")]
         confirmed: bool,
+        seq: u64,
+        sent_at_ms: u64,
         data: serde_json::Value,
     },
     Subscribed {
@@ -233,6 +243,8 @@ impl InboundFrame {
             id,
             channel,
             confirmed,
+            seq,
+            sent_at_ms,
             data,
         } = self
         else {
@@ -252,6 +264,8 @@ impl InboundFrame {
             id,
             channel,
             confirmed,
+            seq,
+            sent_at_ms,
             data: payload,
         })
     }
@@ -298,12 +312,14 @@ mod tests {
 
     #[test]
     fn parses_and_types_clob_event_frames() {
-        let raw = r#"{"type":"event","id":"mid","channel":"clob.midpoint","data":{"asset_id":"7","market":"0xm","midpoint":0.5,"timestamp":1}}"#;
+        let raw = r#"{"type":"event","id":"mid","channel":"clob.midpoint","seq":42,"sent_at_ms":1721818200123,"data":{"asset_id":"7","market":"0xm","midpoint":0.5,"timestamp":1}}"#;
         let event = parse_inbound_frame(raw)
             .expect("valid frame")
             .into_channel_event()
             .expect("event");
         assert_eq!(event.channel, "clob.midpoint");
+        assert_eq!(event.seq, 42);
+        assert_eq!(event.sent_at_ms, 1_721_818_200_123);
         match event.data {
             Payload::ClobMidpoint(mid) => {
                 assert_eq!(mid.asset_id, "7");
@@ -349,11 +365,13 @@ mod tests {
 
     #[test]
     fn parses_and_types_confirmed_event_frames() {
-        let raw = r#"{"type":"event","id":"t","channel":"trading","confirmed":true,"data":{"type":"order_filled_v2","side":1,"tokenId":"0xabc"}}"#;
+        let raw = r#"{"type":"event","id":"t","channel":"trading","confirmed":true,"seq":42,"sent_at_ms":1721818200123,"data":{"type":"order_filled_v2","side":1,"tokenId":"0xabc"}}"#;
         let frame = parse_inbound_frame(raw).expect("valid frame");
         let event = frame.into_channel_event().expect("event");
         assert_eq!(event.id, "t");
         assert!(event.confirmed);
+        assert_eq!(event.seq, 42);
+        assert_eq!(event.sent_at_ms, 1_721_818_200_123);
         match event.data {
             Payload::Trading(trade) => {
                 assert_eq!(trade.kind, TradingEventType::OrderFilledV2);
@@ -366,7 +384,7 @@ mod tests {
 
     #[test]
     fn parses_and_types_pending_event_frames() {
-        let raw = r#"{"type":"event","id":"t","channel":"trading","confirmed":false,"data":{"seen_at_ms":1782027489000,"transaction_hash":"0xhash","from":"0xfrom","to":"0xto","contract_kinds":["exchange"],"method_selector":"0xabcdef12","input":"0xdead","value":"0","call":{"method":"fillOrder","market_ids":["0xm"],"token_ids":["7"],"wallets":["0xw"],"notional_usd":192.5,"orders":[{"maker":"0xa","taker":null,"token_id":"7","side":"buy","maker_amount":"100","taker_amount":"50"}]}}}"#;
+        let raw = r#"{"type":"event","id":"t","channel":"trading","confirmed":false,"seq":42,"sent_at_ms":1721818200123,"data":{"seen_at_ms":1782027489000,"transaction_hash":"0xhash","from":"0xfrom","to":"0xto","contract_kinds":["exchange"],"method_selector":"0xabcdef12","input":"0xdead","value":"0","call":{"method":"fillOrder","market_ids":["0xm"],"token_ids":["7"],"wallets":["0xw"],"notional_usd":192.5,"orders":[{"maker":"0xa","taker":null,"token_id":"7","side":"buy","maker_amount":"100","taker_amount":"50"}]}}}"#;
         let event = parse_inbound_frame(raw)
             .expect("valid frame")
             .into_channel_event()
@@ -390,8 +408,7 @@ mod tests {
 
     #[test]
     fn missing_confirmed_defaults_to_confirmed_feed() {
-        let raw =
-            r#"{"type":"event","id":"t","channel":"trading","data":{"type":"order_cancelled"}}"#;
+        let raw = r#"{"type":"event","id":"t","channel":"trading","seq":42,"sent_at_ms":1721818200123,"data":{"type":"order_cancelled"}}"#;
         let event = parse_inbound_frame(raw)
             .unwrap()
             .into_channel_event()
@@ -401,8 +418,7 @@ mod tests {
 
     #[test]
     fn unknown_channel_falls_back_to_other() {
-        let raw =
-            r#"{"type":"event","id":"m","channel":"unknownz","confirmed":true,"data":{"foo":1}}"#;
+        let raw = r#"{"type":"event","id":"m","channel":"unknownz","confirmed":true,"seq":42,"sent_at_ms":1721818200123,"data":{"foo":1}}"#;
         let event = parse_inbound_frame(raw)
             .unwrap()
             .into_channel_event()
@@ -435,6 +451,16 @@ mod tests {
     fn drops_malformed_frames() {
         assert!(parse_inbound_frame("not json").is_none());
         assert!(parse_inbound_frame(r#"{"type":"mystery"}"#).is_none());
+    }
+
+    #[test]
+    fn drops_event_frames_missing_seq_or_sent_at_ms() {
+        let no_envelope =
+            r#"{"type":"event","id":"t","channel":"trading","data":{"type":"order_cancelled"}}"#;
+        assert!(parse_inbound_frame(no_envelope).is_none());
+
+        let no_sent_at_ms = r#"{"type":"event","id":"t","channel":"trading","seq":42,"data":{"type":"order_cancelled"}}"#;
+        assert!(parse_inbound_frame(no_sent_at_ms).is_none());
     }
 
     #[test]

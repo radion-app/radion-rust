@@ -4,6 +4,25 @@ All notable changes to `radion-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.7.0] - 2026-07-12
+
+### Added
+
+- **`seq` and `sent_at_ms` on every event frame**, surfaced as
+  `ChannelEvent.seq` and `ChannelEvent.sent_at_ms`. `seq` is a per-connection
+  monotonic counter (starting at 0, +1 per event frame across all
+  subscriptions) — a jump means frames were dropped, complementing the
+  `lagged` error. `sent_at_ms` is the Unix-millisecond server send time, so
+  server→client latency is your receive time minus `sent_at_ms`. Pending
+  events keep `data.seen_at_ms` (block-detection time) for block→client
+  latency.
+
+### Changed
+
+- **BREAKING: requires a Radion API that emits the new envelope fields.**
+  `seq` and `sent_at_ms` are required on the event envelope; event frames from
+  older servers fail to deserialize and are dropped.
+
 ## [0.6.0] - 2026-07-06
 
 ### Changed

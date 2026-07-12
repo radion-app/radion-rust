@@ -131,6 +131,12 @@ event) and a channel. Subscriptions default to the confirmed on-chain feed; call
 on the same bare channel name and are told apart by `ChannelEvent.confirmed`;
 their `data` is a decoded transaction (`Payload::Mempool`).
 
+Every event also carries two envelope fields: `seq`, a per-connection monotonic
+counter (+1 per event across all subscriptions — a jump means frames were
+dropped), and `sent_at_ms`, the Unix-millisecond server send time, so
+server→client latency is your receive time minus `sent_at_ms`. Pending events
+keep `data.seen_at_ms` (block-detection time) for block→client latency.
+
 Attach server-side filters with `.with_filters(...)`. Some channels require a
 filter — `wallets` needs `wallets`, `markets` needs `market_ids` or `token_ids`.
 Requirements are validated before any frame is sent.
