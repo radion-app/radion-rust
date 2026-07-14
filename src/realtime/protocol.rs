@@ -122,6 +122,7 @@ impl Subscription {
 }
 
 /// A frame sent from the client to the Radion server.
+#[cfg(feature = "realtime")]
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub(crate) enum OutboundFrame {
@@ -139,6 +140,7 @@ pub(crate) enum OutboundFrame {
     Ping,
 }
 
+#[cfg(feature = "realtime")]
 impl OutboundFrame {
     pub(crate) fn subscribe(subscription: &Subscription) -> Self {
         let confirmed = subscription.channel.topic().map(|_| subscription.confirmed);
@@ -205,12 +207,14 @@ pub(crate) enum InboundFrame {
         #[allow(dead_code)]
         channel: Option<String>,
     },
+    #[cfg_attr(not(feature = "realtime"), allow(dead_code))]
     Warning {
         code: String,
         id: Option<String>,
         message: String,
     },
     Pong,
+    #[cfg_attr(not(feature = "realtime"), allow(dead_code))]
     Error {
         message: String,
         code: Option<String>,

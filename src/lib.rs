@@ -1,8 +1,9 @@
 //! Official, async-first, fully-typed Rust SDK for the [Radion](https://radion.app) platform.
 //!
 //! One [`Radion`] client, one API key. Today the SDK exposes the realtime
-//! (WebSocket) product surface; further surfaces attach to the same client as
-//! they ship, so adopting them is purely additive.
+//! (WebSocket) product surface and standalone [`webhooks`] helpers; further
+//! surfaces attach to the same client as they ship, so adopting them is
+//! purely additive.
 //!
 //! # Example
 //!
@@ -30,6 +31,8 @@
 //! - `rustls` *(default)* — rustls TLS backend (no system OpenSSL dependency).
 //! - `native-tls` — use the platform native TLS backend instead.
 //! - `tracing` — emit [`tracing`](https://docs.rs/tracing) spans/events.
+//! - `webhooks` — consume webhook deliveries: signature verification and body
+//!   parsing. No async transport — works in any HTTP server.
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![warn(missing_docs)]
 #![forbid(unsafe_code)]
@@ -42,6 +45,10 @@ pub use client::{Radion, RadionBuilder};
 pub use config::{DEFAULT_BASE_URL, DEFAULT_WS_URL, RadionConfig};
 pub use error::{RadionError, Result};
 
-#[cfg(feature = "realtime")]
-#[cfg_attr(docsrs, doc(cfg(feature = "realtime")))]
+#[cfg(any(feature = "realtime", feature = "webhooks"))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "realtime", feature = "webhooks"))))]
 pub mod realtime;
+
+#[cfg(feature = "webhooks")]
+#[cfg_attr(docsrs, doc(cfg(feature = "webhooks")))]
+pub mod webhooks;

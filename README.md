@@ -40,6 +40,8 @@ async fn main() -> anyhow::Result<()> {
 - **Typed end-to-end** — every frame, channel, filter, and payload is statically
   typed; events stream as a typed `Payload` enum you can `match` exhaustively.
 - **Async-first** — built on `tokio`; events are a [`Stream`](https://docs.rs/futures).
+- **Webhook helpers** — verify delivery signatures and parse bodies into the same typed
+  `Payload` events (`webhooks` feature, no async transport).
 
 ## Requirements
 
@@ -59,6 +61,7 @@ Cargo features:
 | `rustls` | ✅ | rustls TLS backend (no system OpenSSL). |
 | `native-tls` | | Use the platform native TLS backend instead. |
 | `tracing` | | Emit [`tracing`](https://docs.rs/tracing) spans/events. |
+| `webhooks` | | Webhook helpers: signature verification + typed body parsing. No async transport. |
 
 To drop the realtime transport (e.g. for a future REST-only build):
 
@@ -218,6 +221,43 @@ By default the client reconnects with exponential backoff (500ms initial, ×2,
 A ping is sent every 15s; if no inbound traffic arrives within 10s the connection
 is treated as stale, torn down, and reconnected. Tune via
 `RealtimeOptions::heartbeat(...)` or disable with `.disable_heartbeat()`.
+
+### Webhooks
+
+Radion webhooks POST the same event frames as the WebSocket, signed with your
+endpoint's secret. Enable the `webhooks` feature for standalone helpers — no
+client and no async transport, so they fit any HTTP server:
+
+```sh
+cargo add radion-sdk --features webhooks
+```
+
+```rust,no_run
+use radion_sdk::webhooks::{WebhookDelivery, parse_webhook_event};
+
+fn handle(raw_body: &[u8], signature: &str, timestamp: &str, secret: &str) {
+    let delivery = WebhookDelivery {
+        payload: raw_body,
+        signature,
+        timestamp,
+    };
+    if !delivery.verify(&[secret]) {
+        return;
+    }
+    let raw = std::str::from_utf8(raw_body).unwrap_or_default();
+    if let Some(event) = parse_webhook_event(raw) {
+        println!("{} seq={} {:?}", event.channel, event.seq, event.data);
+    }
+}
+```
+
+`payload` is the raw request body exactly as received, `signature` the
+`X-Radion-Signature` header, and `timestamp` the `X-Radion-Timestamp` header.
+`verify` runs a constant-time HMAC-SHA256 check and rejects deliveries older
+than five minutes — tune the replay window with `verify_with_tolerance`, and
+pass both secrets during a rotation window. `parse_webhook_event` returns the
+same typed `ChannelEvent` the realtime client streams. Deliveries are retried
+and unordered, so deduplicate on `(id, seq)` or on fields of `data`.
 
 ### Error handling
 

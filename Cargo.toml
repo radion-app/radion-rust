@@ -1,6 +1,6 @@
 [package]
 name = "radion-sdk"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2024"
 rust-version = "1.85"
 description = "Official, async-first, fully-typed Rust SDK for the Radion platform"
@@ -16,6 +16,8 @@ categories = ["api-bindings", "asynchronous", "web-programming::websocket"]
 default = ["realtime", "rustls"]
 # The realtime (WebSocket) product surface. Pulls in the async transport.
 realtime = ["dep:tokio", "dep:tokio-tungstenite", "dep:tokio-stream", "dep:futures-util"]
+# Consume webhook deliveries: signature verification + body parsing. No async transport.
+webhooks = ["dep:hmac", "dep:sha2"]
 # TLS backends for the realtime transport. Pick exactly one.
 rustls = ["tokio-tungstenite?/rustls-tls-webpki-roots"]
 native-tls = ["tokio-tungstenite?/native-tls"]
@@ -43,6 +45,8 @@ futures-util = { version = "0.3", default-features = false, features = [
   "std",
 ], optional = true }
 tracing = { version = "0.1", optional = true }
+hmac = { version = "0.12", optional = true }
+sha2 = { version = "0.10", optional = true }
 
 [dev-dependencies]
 anyhow = "1"

@@ -4,6 +4,28 @@ All notable changes to `radion-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.0] - 2026-07-14
+
+### Added
+
+- **Webhook helpers** behind a new `webhooks` cargo feature, for consuming
+  Radion webhook deliveries. `WebhookDelivery { payload, signature, timestamp }`
+  authenticates a delivery: `verify` checks the `X-Radion-Signature` header
+  (`v1=` + hex HMAC-SHA256 over `{timestamp}.{body}`) against one or more
+  secrets (pass both during a rotation window) with a constant-time compare,
+  and rejects stale timestamps (5 minutes by default —
+  `DEFAULT_WEBHOOK_TOLERANCE_MS`; tune with `verify_with_tolerance`).
+  `parse_webhook_event` validates a raw body into a typed `WebhookEvent` — an
+  alias of `ChannelEvent`, since webhook deliveries carry the same event frame
+  as the WebSocket.
+
+### Changed
+
+- The channel, payload, and frame types under `realtime` (`Channel`,
+  `Payload`, `ChannelEvent`, …) now compile with either the `realtime` or the
+  `webhooks` feature, so `webhooks` pulls in only `hmac` + `sha2` — no tokio
+  and no WebSocket transport. Public API is unchanged with default features.
+
 ## [0.7.0] - 2026-07-12
 
 ### Added
