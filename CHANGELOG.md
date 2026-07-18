@@ -4,6 +4,13 @@ All notable changes to `radion-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.1] - 2026-07-18
+
+### Changed
+
+- Swapped the `anyhow` dev/doc dependency for `eyre`. Examples and doctests now
+  return `eyre::Result`. No library API change.
+
 ## [0.8.0] - 2026-07-14
 
 ### Added
