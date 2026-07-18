@@ -11,7 +11,7 @@
 //! use futures_util::StreamExt;
 //! use radion_sdk::{Radion, realtime::{Channel, Payload, Subscription}};
 //!
-//! # async fn run() -> anyhow::Result<()> {
+//! # async fn run() -> eyre::Result<()> {
 //! let radion = Radion::builder().api_key("sk_...").build()?;
 //! radion.realtime.connect().await?;
 //!

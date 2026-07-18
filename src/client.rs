@@ -32,7 +32,7 @@ impl Radion {
 /// Builder for [`Radion`].
 ///
 /// ```no_run
-/// # fn main() -> anyhow::Result<()> {
+/// # fn main() -> eyre::Result<()> {
 /// let radion = radion_sdk::Radion::builder()
 ///     .api_key("sk_...")
 ///     .build()?;

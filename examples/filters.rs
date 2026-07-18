@@ -9,7 +9,7 @@ use radion_sdk::Radion;
 use radion_sdk::realtime::{Channel, ChannelFilters, Subscription};
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> eyre::Result<()> {
     let api_key = std::env::var("RADION_API_KEY").expect("set RADION_API_KEY");
     let radion = Radion::builder().api_key(api_key).build()?;
     radion.realtime.connect().await?;
