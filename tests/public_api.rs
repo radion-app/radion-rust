@@ -53,3 +53,23 @@ fn clob_channels_are_first_class_and_require_token_ids() {
             .is_ok()
     );
 }
+
+#[cfg(feature = "compression")]
+#[test]
+fn compression_is_opt_in_on_both_builders() {
+    use radion_sdk::realtime::RealtimeOptions;
+
+    assert!(!RealtimeOptions::new("sk_test").compression);
+    assert!(
+        RealtimeOptions::new("sk_test")
+            .compression(true)
+            .compression
+    );
+    assert!(
+        Radion::builder()
+            .api_key("sk_test")
+            .compression(true)
+            .build()
+            .is_ok()
+    );
+}

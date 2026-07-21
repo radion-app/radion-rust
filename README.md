@@ -60,6 +60,7 @@ Cargo features:
 | `realtime` | ✅ | The WebSocket product surface. |
 | `rustls` | ✅ | rustls TLS backend (no system OpenSSL). |
 | `native-tls` | | Use the platform native TLS backend instead. |
+| `compression` | | Inflate zlib-compressed realtime frames. Opt in per client. |
 | `tracing` | | Emit [`tracing`](https://docs.rs/tracing) spans/events. |
 | `webhooks` | | Webhook helpers: signature verification + typed body parsing. No async transport. |
 
@@ -82,6 +83,7 @@ Build a client with [`Radion::builder`]:
 | `.ws_url(url)` | Override the realtime endpoint. Defaults to `wss://api.radion.app/ws`. |
 | `.token(jwt)` / `.token_provider(p)` | User JWT for the `pk_jwt_` flow (see below). |
 | `.auth_in_query(true)` | Send credentials in the WS URL query string. |
+| `.compression(true)` | Ask for zlib-compressed realtime frames (`compression` feature). |
 
 ```rust,no_run
 let radion = radion_sdk::Radion::builder().api_key("sk_...").build()?;
@@ -222,6 +224,33 @@ A ping is sent every 15s; if no inbound traffic arrives within 10s the connectio
 is treated as stale, torn down, and reconnected. Tune via
 `RealtimeOptions::heartbeat(...)` or disable with `.disable_heartbeat()`.
 
+### Compression
+
+Enable the `compression` feature and call `.compression(true)` to cut bandwidth
+on high-volume channels:
+
+```sh
+cargo add radion-sdk --features compression
+```
+
+```rust,no_run
+let radion = radion_sdk::Radion::builder()
+    .api_key("sk_...")
+    .compression(true)
+    .build()?;
+# Ok::<(), radion_sdk::RadionError>(())
+```
+
+This adds `compress=zlib` to the connect URL. The server then sends event frames
+as binary zlib (RFC 1950), which the client inflates before parsing. Text frames
+still work, so a server may mix both on one connection. Pings and pongs are
+unaffected. A frame that fails to inflate is reported on the `lifecycle()` stream
+as `LifecycleEvent::Error(RadionError::Decompression(_))` — it is never dropped
+in silence.
+
+Compression is off by default: it trades CPU for bandwidth, which only pays off
+on busy subscriptions.
+
 ### Webhooks
 
 Radion webhooks POST the same event frames as the WebSocket, signed with your
@@ -262,9 +291,9 @@ and unordered, so deduplicate on `(id, seq)` or on fields of `data`.
 ### Error handling
 
 `RadionError` covers connection-lifecycle misuse (`Connection`), server-reported
-`error` frames (`Server`), and transport failures (`Transport`). Server and
-transport errors during a live connection are surfaced on the `lifecycle()`
-stream as `LifecycleEvent::Error`.
+`error` frames (`Server`), transport failures (`Transport`), and frames that
+fail to inflate (`Decompression`). Errors during a live connection are surfaced
+on the `lifecycle()` stream as `LifecycleEvent::Error`.
 
 ## License
 

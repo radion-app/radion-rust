@@ -15,6 +15,8 @@ mod auth;
 mod channels;
 #[cfg(feature = "realtime")]
 mod client;
+#[cfg(feature = "compression")]
+mod compression;
 mod payloads;
 pub(crate) mod protocol;
 #[cfg(feature = "realtime")]

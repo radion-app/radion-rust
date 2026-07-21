@@ -4,6 +4,19 @@ All notable changes to `radion-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Frame compression** behind a new `compression` cargo feature. Turn it on per
+  client with `.compression(true)` (on `Radion::builder` or `RealtimeOptions`)
+  and the client adds `compress=zlib` to the connect URL. The server then sends
+  event frames as binary zlib (RFC 1950), which the client inflates before
+  parsing. Text frames still work, so a server may mix both on one connection;
+  pings and pongs are unaffected. Off by default.
+- `RadionError::Decompression`, for a frame that fails to inflate. It reaches
+  the `lifecycle()` stream as `LifecycleEvent::Error` — never dropped in silence.
+
 ## [0.8.1] - 2026-07-18
 
 ### Changed

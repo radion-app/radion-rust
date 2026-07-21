@@ -48,6 +48,8 @@ pub struct RadionBuilder {
     token_provider: Option<crate::realtime::TokenProvider>,
     #[cfg(feature = "realtime")]
     auth_in_query: bool,
+    #[cfg(feature = "compression")]
+    compression: bool,
 }
 
 impl RadionBuilder {
@@ -99,6 +101,15 @@ impl RadionBuilder {
         self
     }
 
+    /// Ask the realtime server for zlib-compressed binary frames.
+    #[cfg(feature = "compression")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "compression")))]
+    #[must_use]
+    pub fn compression(mut self, enabled: bool) -> Self {
+        self.compression = enabled;
+        self
+    }
+
     /// Build the [`Radion`] client.
     ///
     /// # Errors
@@ -122,6 +133,10 @@ impl RadionBuilder {
             let mut options = crate::realtime::RealtimeOptions::new(api_key)
                 .url(config.ws_url.clone())
                 .auth_in_query(self.auth_in_query);
+            #[cfg(feature = "compression")]
+            {
+                options = options.compression(self.compression);
+            }
             if let Some(provider) = self.token_provider {
                 options = options.token_provider(provider);
             }
@@ -146,6 +161,17 @@ mod builder_tests {
             .api_key("pk_jwt_x")
             .token("jwt")
             .auth_in_query(true)
+            .build()
+            .expect("builds");
+        let _ = radion;
+    }
+
+    #[cfg(feature = "compression")]
+    #[test]
+    fn builder_forwards_compression_to_the_realtime_options() {
+        let radion = Radion::builder()
+            .api_key("sk_x")
+            .compression(true)
             .build()
             .expect("builds");
         let _ = radion;

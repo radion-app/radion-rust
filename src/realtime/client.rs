@@ -16,6 +16,8 @@ use tokio_tungstenite::tungstenite::http::header::{HeaderName, HeaderValue};
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
 use super::auth::{TokenProvider, build_auth_query_url};
+#[cfg(feature = "compression")]
+use super::compression::{inflate, with_compress_query};
 use super::protocol::{
     ChannelEvent, InboundFrame, OutboundFrame, Subscription, parse_inbound_frame,
 };
@@ -65,6 +67,10 @@ pub struct RealtimeOptions {
     /// Send credentials in the URL query instead of headers. Defaults to
     /// `false`; enable for header-stripping proxies or gateways.
     pub auth_in_query: bool,
+    /// Ask the server for zlib-compressed binary frames. Defaults to `false`.
+    #[cfg(feature = "compression")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "compression")))]
+    pub compression: bool,
 }
 
 impl RealtimeOptions {
@@ -77,6 +83,8 @@ impl RealtimeOptions {
             heartbeat: Some(HeartbeatOptions::default()),
             token_provider: None,
             auth_in_query: false,
+            #[cfg(feature = "compression")]
+            compression: false,
         }
     }
 
@@ -134,6 +142,33 @@ impl RealtimeOptions {
     pub fn auth_in_query(mut self, enabled: bool) -> Self {
         self.auth_in_query = enabled;
         self
+    }
+
+    /// Ask the server for zlib-compressed binary frames.
+    ///
+    /// Adds `compress=zlib` to the connect URL. The server then sends event
+    /// frames as binary zlib, which the client inflates before parsing. Text
+    /// frames still work, so mixed traffic is fine.
+    #[cfg(feature = "compression")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "compression")))]
+    #[must_use]
+    pub fn compression(mut self, enabled: bool) -> Self {
+        self.compression = enabled;
+        self
+    }
+
+    /// Decode a binary frame into the JSON text it carries: inflate it when
+    /// compression is on, otherwise read it as plain UTF-8.
+    fn decode_binary(&self, bytes: &[u8]) -> Result<String> {
+        #[cfg(feature = "compression")]
+        {
+            if self.compression {
+                return inflate(bytes);
+            }
+        }
+        std::str::from_utf8(bytes)
+            .map(str::to_owned)
+            .map_err(RadionError::transport)
     }
 }
 
@@ -479,15 +514,16 @@ async fn connect_ws(
         None => None,
     };
 
+    let base_url = connect_url(options);
+
     let (ws, _response) = if options.auth_in_query {
-        let url = build_auth_query_url(&options.url, &options.api_key, token.as_deref());
+        let url = build_auth_query_url(&base_url, &options.api_key, token.as_deref());
         let request = url.into_client_request().map_err(RadionError::transport)?;
         tokio_tungstenite::connect_async(request)
             .await
             .map_err(RadionError::transport)?
     } else {
-        let mut request = options
-            .url
+        let mut request = base_url
             .as_str()
             .into_client_request()
             .map_err(RadionError::transport)?;
@@ -507,6 +543,17 @@ async fn connect_ws(
             .map_err(RadionError::transport)?
     };
     Ok(ws)
+}
+
+/// The URL to connect to, carrying `compress=zlib` when compression is on.
+fn connect_url(options: &RealtimeOptions) -> String {
+    #[cfg(feature = "compression")]
+    {
+        if options.compression {
+            return with_compress_query(&options.url);
+        }
+    }
+    options.url.clone()
 }
 
 /// Run one connected session until it shuts down or drops.
@@ -549,7 +596,7 @@ where
             message = ws.next() => match message {
                 Some(Ok(message)) => {
                     stale_deadline = None;
-                    if let Some(outcome) = handle_message(&message, events_tx, lifecycle_tx) {
+                    if let Some(outcome) = handle_message(&message, options, events_tx, lifecycle_tx) {
                         return outcome;
                     }
                 }
@@ -607,15 +654,26 @@ async fn next_ping(ping: &mut Option<tokio::time::Interval>) {
 }
 
 /// Route an inbound message. Returns `Some` to end the session on a close frame.
+///
+/// Text frames are parsed as JSON. Binary frames are inflated first when
+/// compression is on, so a server may mix both on one connection.
 fn handle_message(
     message: &Message,
+    options: &RealtimeOptions,
     events_tx: &broadcast::Sender<ChannelEvent>,
     lifecycle_tx: &broadcast::Sender<LifecycleEvent>,
 ) -> Option<SessionOutcome> {
     match message {
-        Message::Text(_) | Message::Binary(_) => {
-            if let Ok(text) = message.to_text() {
-                route_text(text, events_tx, lifecycle_tx);
+        Message::Text(text) => {
+            route_text(text, events_tx, lifecycle_tx);
+            None
+        }
+        Message::Binary(bytes) => {
+            match options.decode_binary(bytes) {
+                Ok(text) => route_text(&text, events_tx, lifecycle_tx),
+                Err(error) => {
+                    let _ = lifecycle_tx.send(LifecycleEvent::Error(error));
+                }
             }
             None
         }
@@ -705,5 +763,112 @@ mod auth_wiring_tests {
     fn accepts_async_provider() {
         let _ = RealtimeOptions::new("k")
             .token_provider(TokenProvider::new(|| async { Ok("x".into()) }));
+    }
+}
+
+#[cfg(all(test, feature = "compression"))]
+mod compression_wiring_tests {
+    use std::io::Write;
+
+    use flate2::Compression;
+    use flate2::write::ZlibEncoder;
+
+    use super::*;
+
+    const PONG: &str = r#"{"type":"pong"}"#;
+    const EVENT: &str = r#"{"type":"event","id":"t","channel":"trading","confirmed":true,"seq":1,"sent_at_ms":1721818200123,"data":{"type":"order_cancelled"}}"#;
+
+    fn deflate(text: &str) -> Vec<u8> {
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(text.as_bytes()).expect("writes");
+        encoder.finish().expect("finishes")
+    }
+
+    #[test]
+    fn compression_is_off_by_default() {
+        assert!(!RealtimeOptions::new("k").compression);
+    }
+
+    #[test]
+    fn builder_flips_the_flag() {
+        assert!(RealtimeOptions::new("k").compression(true).compression);
+    }
+
+    #[test]
+    fn connect_url_is_untouched_when_compression_is_off() {
+        let options = RealtimeOptions::new("k").url("wss://example.test/ws");
+        assert_eq!(connect_url(&options), "wss://example.test/ws");
+    }
+
+    #[test]
+    fn connect_url_asks_for_zlib_when_compression_is_on() {
+        let options = RealtimeOptions::new("k")
+            .url("wss://example.test/ws")
+            .compression(true);
+        assert_eq!(connect_url(&options), "wss://example.test/ws?compress=zlib");
+    }
+
+    #[test]
+    fn connect_url_keeps_an_existing_query() {
+        let options = RealtimeOptions::new("k")
+            .url("wss://example.test/ws?v=1")
+            .compression(true);
+        assert_eq!(
+            connect_url(&options),
+            "wss://example.test/ws?v=1&compress=zlib"
+        );
+    }
+
+    #[test]
+    fn binary_frames_inflate_when_compression_is_on() {
+        let options = RealtimeOptions::new("k").compression(true);
+        assert_eq!(options.decode_binary(&deflate(PONG)).unwrap(), PONG);
+    }
+
+    #[test]
+    fn binary_frames_stay_plain_when_compression_is_off() {
+        let options = RealtimeOptions::new("k");
+        assert_eq!(options.decode_binary(PONG.as_bytes()).unwrap(), PONG);
+    }
+
+    #[test]
+    fn inflate_failure_surfaces_on_the_lifecycle_stream() {
+        let options = RealtimeOptions::new("k").compression(true);
+        let (events_tx, _events_rx) = broadcast::channel(EVENT_BUFFER);
+        let (lifecycle_tx, mut lifecycle_rx) = broadcast::channel(LIFECYCLE_BUFFER);
+
+        let outcome = handle_message(
+            &Message::binary(b"not zlib at all".to_vec()),
+            &options,
+            &events_tx,
+            &lifecycle_tx,
+        );
+
+        assert!(outcome.is_none());
+        match lifecycle_rx.try_recv().expect("lifecycle event") {
+            LifecycleEvent::Error(RadionError::Decompression(_)) => {}
+            other => panic!("expected a decompression error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn text_and_compressed_binary_both_deliver_events() {
+        let options = RealtimeOptions::new("k").compression(true);
+        let (events_tx, mut events_rx) = broadcast::channel(EVENT_BUFFER);
+        let (lifecycle_tx, _lifecycle_rx) = broadcast::channel(LIFECYCLE_BUFFER);
+
+        handle_message(&Message::text(EVENT), &options, &events_tx, &lifecycle_tx);
+        handle_message(
+            &Message::binary(deflate(EVENT)),
+            &options,
+            &events_tx,
+            &lifecycle_tx,
+        );
+
+        assert_eq!(events_rx.try_recv().expect("text event").channel, "trading");
+        assert_eq!(
+            events_rx.try_recv().expect("binary event").channel,
+            "trading"
+        );
     }
 }

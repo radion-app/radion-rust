@@ -33,6 +33,10 @@ pub enum RadionError {
     /// The underlying WebSocket transport failed.
     #[error("transport error: {0}")]
     Transport(String),
+
+    /// A compressed binary frame could not be inflated.
+    #[error("decompression error: {0}")]
+    Decompression(String),
 }
 
 impl RadionError {
@@ -45,5 +49,11 @@ impl RadionError {
     #[cfg(feature = "realtime")]
     pub(crate) fn transport(source: impl std::fmt::Display) -> Self {
         Self::Transport(source.to_string())
+    }
+
+    /// Construct a [`RadionError::Decompression`] from any displayable source.
+    #[cfg(feature = "compression")]
+    pub(crate) fn decompression(source: impl std::fmt::Display) -> Self {
+        Self::Decompression(source.to_string())
     }
 }

@@ -30,6 +30,8 @@
 //! - `realtime` *(default)* — the WebSocket product surface.
 //! - `rustls` *(default)* — rustls TLS backend (no system OpenSSL dependency).
 //! - `native-tls` — use the platform native TLS backend instead.
+//! - `compression` — inflate zlib-compressed realtime frames. Opt in per client
+//!   with `.compression(true)`.
 //! - `tracing` — emit [`tracing`](https://docs.rs/tracing) spans/events.
 //! - `webhooks` — consume webhook deliveries: signature verification and body
 //!   parsing. No async transport — works in any HTTP server.
